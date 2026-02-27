@@ -1,0 +1,51 @@
+# Dependencies
+node_modules/
+.venv/
+venv/
+env/
+__pypackages__/
+
+# Build
+dist/
+build/
+*.egg-info/
+*.egg
+*.whl
+*.pyc
+*.pyo
+__pycache__/
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Coverage & Testing
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.lcov
+
+# Logs
+*.log
+logs/
+
+# Misc
+*.bak
+*.tmp
+.claude/files/
