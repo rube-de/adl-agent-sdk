@@ -1,0 +1,20 @@
+id: documentation
+description: Documentation — plan, write, review (no dev team needed)
+
+stages:
+  - ref: plan
+    agent: architect
+
+  - ref: plan_review
+    agent: plan_reviewer
+    loopTarget: plan
+    maxIterations: 1
+
+  - ref: write
+    agent: developer
+
+  - ref: review
+    agent: reviewer
+    reviewers: [claude]
+    loopTarget: write
+    maxIterations: 2

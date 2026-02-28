@@ -1,0 +1,39 @@
+id: feature
+description: Feature implementation — research, planning, iterative dev, thorough review
+
+stages:
+  - ref: research
+    agent: researcher
+    optional: true
+    condition: unknowns_exist
+
+  - ref: plan
+    agent: architect
+
+  - ref: plan_review
+    agent: plan_reviewer
+    loopTarget: plan
+    maxIterations: 2
+
+  - ref: dev
+    type: team
+    agent: orchestrator
+    team:
+      tester:
+        agent: tester
+        model_role: smol
+      developer:
+        agent: developer
+        model_role: default
+
+  - ref: multi_review
+    agent: reviewer
+    reviewers: [claude, gemini, codex]
+    loopTarget: dev
+    maxIterations: 5
+
+  - ref: security
+    agent: security_reviewer
+    optional: true
+    condition: security_relevant
+    canVeto: true

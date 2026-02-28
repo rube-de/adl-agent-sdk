@@ -1,0 +1,12 @@
+id: security_audit
+description: Security audit — security-first with veto authority
+
+stages:
+  - ref: security
+    agent: security_reviewer
+    canVeto: true
+
+  - ref: code_review
+    agent: reviewer
+    optional: true
+    condition: code_review_needed
