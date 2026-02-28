@@ -2,19 +2,20 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .agent_loader import load_agents
 from .branch import build_branch_name
-from .dev_loop import dev_loop, MaxDevCyclesError
-from .hooks import CommandGuard, LoggingSecurityHandler, SecurityEvent, create_default_guard
+from .dispatcher import OrchestratorDispatcher
+from .hooks import CommandGuard, LoggingSecurityHandler, create_default_guard
 from .models import Config, Issue
-from .plan_loop import plan_loop, MaxPlanIterationsError
-from .review_loop import review_loop, MaxReviewCyclesError
+from .pr import build_pr_command, create_pr  # noqa: F401 — re-exported for tests
+from .workflow_engine import execute_workflow
+from .workflow_loader import load_all_workflows
 from .workflow_router import select_workflow
 from .worktrees import create_worktree, delete_worktree
 
@@ -44,53 +45,11 @@ class ProcessResult:
     error: str | None = None
 
 
-def build_pr_command(
-    repo: str, title: str, body: str, branch: str,
-) -> list[str]:
-    """Build the gh pr create command."""
-    return [
-        "gh", "pr", "create",
-        "--repo", repo,
-        "--title", title,
-        "--body", body,
-        "--head", branch,
-    ]
-
-
-async def create_pr(issue: Issue, worktree: Path) -> int:
-    """Create a PR via gh CLI, return PR number."""
-    branch = build_branch_name(issue)
-
-    proc = await asyncio.create_subprocess_exec(
-        "git", "push", "-u", "origin", branch,
-        cwd=str(worktree),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    _, stderr = await proc.communicate()
-    if proc.returncode != 0:
-        raise RuntimeError(f"git push failed: {stderr.decode().strip()}")
-
-    cmd = build_pr_command(
-        repo=issue.repo,
-        title=f"[ADL] {issue.title}",
-        body=f"Resolves #{issue.number}\n\nAutonomously implemented by ADL.",
-        branch=branch,
-    )
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        cwd=str(worktree),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, stderr = await proc.communicate()
-
-    if proc.returncode != 0:
-        raise RuntimeError(f"gh pr create failed: {stderr.decode()}")
-
-    url = stdout.decode().strip()
-    pr_number = int(url.rstrip("/").split("/")[-1])
-    return pr_number
+_RESULT_STATE_MAP = {
+    "completed": IssueState.COMPLETED,
+    "escalated": IssueState.ESCALATED,
+    "vetoed": IssueState.ESCALATED,
+}
 
 
 async def _flush_security_events(
@@ -150,45 +109,43 @@ async def process_issue(
         create_worktree(_repo_path, worktree_path, branch)
         log.info(f"Processing {issue.repo}#{issue.number} in {worktree_path}")
 
+        # Select and load workflow
         workflow_id = select_workflow(issue, config.workflow_selection)
         log.info(f"Selected workflow: {workflow_id}")
         if issue_logger:
             issue_logger.log_event("workflow_selected", {"workflow": workflow_id})
 
-        # --- Planning ---
+        workflows = load_all_workflows(Path(config.defaults.workflows_dir))
+        if workflow_id not in workflows:
+            raise ValueError(f"Workflow '{workflow_id}' not found in {config.defaults.workflows_dir}")
+        workflow = workflows[workflow_id]
+
+        agents = load_agents(Path(config.defaults.agents_dir))
+
+        # Create dispatcher with all dependencies
+        dispatcher = OrchestratorDispatcher(
+            agents=agents,
+            config=config,
+            worktree=worktree_path,
+            guard=guard,
+            telegram=telegram,
+            issue=issue,
+        )
+
+        # Execute workflow — replaces hardcoded plan→dev→PR→review pipeline
         await _transition(IssueState.PLANNING, store, issue_logger, issue)
-        plan_result = await plan_loop(issue, worktree_path, config, guard=guard)
+        result = await execute_workflow(workflow, issue, dispatcher)
         await _flush_security_events(guard, issue, telegram)
-        log.info(f"Plan approved after {plan_result.iterations} iterations")
 
-        # --- Development ---
-        await _transition(IssueState.DEVELOPING, store, issue_logger, issue)
-        dev_result = await dev_loop(
-            issue, plan_result.plan, worktree_path, config, guard=guard,
+        # Map workflow result to process result
+        final_state = _RESULT_STATE_MAP.get(result.status, IssueState.FAILED)
+        await _transition(final_state, store, issue_logger, issue)
+
+        return ProcessResult(
+            state=final_state,
+            pr_number=dispatcher.pr_number,
+            error=f"Workflow {result.status} at stage {result.stage}" if result.status != "completed" else None,
         )
-        await _flush_security_events(guard, issue, telegram)
-        log.info(f"Dev completed after {dev_result.cycles} cycles")
-
-        # --- PR creation ---
-        pr_number = await create_pr(issue, worktree_path)
-        await _transition(IssueState.PR_CREATED, store, issue_logger, issue)
-        log.info(f"PR #{pr_number} created")
-
-        # --- Review ---
-        await _transition(IssueState.IN_REVIEW, store, issue_logger, issue)
-        review_result = await review_loop(
-            issue, pr_number, worktree_path, config, guard=guard,
-        )
-        await _flush_security_events(guard, issue, telegram)
-        log.info(f"Review completed after {review_result.cycles} cycles")
-
-        await _transition(IssueState.COMPLETED, store, issue_logger, issue)
-        return ProcessResult(state=IssueState.COMPLETED, pr_number=pr_number)
-
-    except (MaxPlanIterationsError, MaxDevCyclesError, MaxReviewCyclesError) as e:
-        log.error(f"Loop exhausted for {issue.repo}#{issue.number}: {e}")
-        await _transition(IssueState.FAILED, store, issue_logger, issue)
-        return ProcessResult(state=IssueState.FAILED, error=str(e))
 
     except Exception as e:
         log.exception(f"Unexpected error processing {issue.repo}#{issue.number}")

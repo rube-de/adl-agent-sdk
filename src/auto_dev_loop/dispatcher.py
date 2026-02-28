@@ -12,7 +12,7 @@ from .dev_loop import run_agent_team
 from .hooks import CommandGuard
 from .models import Config, Issue, ReviewVerdict
 from .multi_model import multi_model_review
-from .orchestrator import create_pr
+from .pr import create_pr
 from .review_loop import review_loop
 from .workflow_engine import StageDispatcher
 from .workflow_loader import StageConfig

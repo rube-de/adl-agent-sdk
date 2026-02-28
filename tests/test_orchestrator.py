@@ -33,45 +33,70 @@ def _config():
 
 
 @pytest.mark.asyncio
-async def test_process_issue_full_lifecycle():
-    """Happy path: claim -> workflow -> plan -> dev -> PR -> review -> done."""
-    mock_plan_result = MagicMock()
-    mock_plan_result.plan = "the plan"
-    mock_plan_result.iterations = 1
-
-    mock_dev_result = MagicMock()
-    mock_dev_result.diff = "diff"
-    mock_dev_result.cycles = 1
-
-    mock_review_result = MagicMock()
-    mock_review_result.cycles = 0
-    mock_review_result.merged = False
+async def test_process_issue_uses_workflow_engine():
+    """process_issue should load workflow, create dispatcher, and call execute_workflow."""
+    from auto_dev_loop.models import WorkflowResult
 
     with patch("auto_dev_loop.orchestrator.create_worktree"):
-        with patch("auto_dev_loop.orchestrator.select_workflow", return_value="bug_fix"):
-            with patch("auto_dev_loop.orchestrator.plan_loop", return_value=mock_plan_result):
-                with patch("auto_dev_loop.orchestrator.dev_loop", return_value=mock_dev_result):
-                    with patch("auto_dev_loop.orchestrator.create_pr", return_value=1):
-                        with patch("auto_dev_loop.orchestrator.review_loop", return_value=mock_review_result):
-                            with patch("auto_dev_loop.orchestrator.delete_worktree"):
-                                result = await process_issue(_issue(), _config(), repo_path=Path("/tmp/repo"))
+        with patch("auto_dev_loop.orchestrator.delete_worktree"):
+            with patch("auto_dev_loop.orchestrator.select_workflow", return_value="bug_fix"):
+                with patch("auto_dev_loop.orchestrator.load_all_workflows") as mock_load_wf:
+                    mock_wf = MagicMock()
+                    mock_load_wf.return_value = {"bug_fix": mock_wf}
+                    with patch("auto_dev_loop.orchestrator.load_agents", return_value={}):
+                        with patch("auto_dev_loop.orchestrator.execute_workflow") as mock_exec:
+                            mock_exec.return_value = WorkflowResult(status="completed")
+                            with patch("auto_dev_loop.orchestrator.OrchestratorDispatcher") as mock_disp_cls:
+                                mock_disp = MagicMock()
+                                mock_disp.pr_number = 99
+                                mock_disp_cls.return_value = mock_disp
+                                result = await process_issue(
+                                    _issue(), _config(), repo_path=Path("/tmp/repo"),
+                                )
 
     assert result.state == IssueState.COMPLETED
-    assert result.pr_number == 1
+    assert result.pr_number == 99
+    mock_exec.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_process_issue_plan_fails():
-    from auto_dev_loop.plan_loop import MaxPlanIterationsError
+async def test_process_issue_escalated():
+    from auto_dev_loop.models import WorkflowResult
 
     with patch("auto_dev_loop.orchestrator.create_worktree"):
-        with patch("auto_dev_loop.orchestrator.select_workflow", return_value="bug_fix"):
-            with patch("auto_dev_loop.orchestrator.plan_loop", side_effect=MaxPlanIterationsError("max")):
-                with patch("auto_dev_loop.orchestrator.delete_worktree"):
-                    result = await process_issue(_issue(), _config(), repo_path=Path("/tmp/repo"))
+        with patch("auto_dev_loop.orchestrator.delete_worktree"):
+            with patch("auto_dev_loop.orchestrator.select_workflow", return_value="feature"):
+                with patch("auto_dev_loop.orchestrator.load_all_workflows") as mock_load_wf:
+                    mock_load_wf.return_value = {"feature": MagicMock()}
+                    with patch("auto_dev_loop.orchestrator.load_agents", return_value={}):
+                        with patch("auto_dev_loop.orchestrator.execute_workflow") as mock_exec:
+                            mock_exec.return_value = WorkflowResult(status="escalated", stage="review")
+                            with patch("auto_dev_loop.orchestrator.OrchestratorDispatcher") as mock_disp_cls:
+                                mock_disp_cls.return_value = MagicMock(pr_number=None)
+                                result = await process_issue(
+                                    _issue(), _config(), repo_path=Path("/tmp/repo"),
+                                )
+
+    assert result.state == IssueState.ESCALATED
+
+
+@pytest.mark.asyncio
+async def test_process_issue_exception_maps_to_failed():
+    """Any exception during workflow execution maps to FAILED."""
+    with patch("auto_dev_loop.orchestrator.create_worktree"):
+        with patch("auto_dev_loop.orchestrator.delete_worktree"):
+            with patch("auto_dev_loop.orchestrator.select_workflow", return_value="feature"):
+                with patch("auto_dev_loop.orchestrator.load_all_workflows") as mock_load_wf:
+                    mock_load_wf.return_value = {"feature": MagicMock()}
+                    with patch("auto_dev_loop.orchestrator.load_agents", return_value={}):
+                        with patch("auto_dev_loop.orchestrator.execute_workflow", side_effect=RuntimeError("boom")):
+                            with patch("auto_dev_loop.orchestrator.OrchestratorDispatcher"):
+                                result = await process_issue(
+                                    _issue(), _config(), repo_path=Path("/tmp/repo"),
+                                )
 
     assert result.state == IssueState.FAILED
-    assert "max" in result.error
+    assert "boom" in result.error
 
 
 def test_build_pr_command():
@@ -98,7 +123,7 @@ async def test_create_pr_push_fails():
     """git push failure should raise before gh pr create runs."""
     push_proc = _mock_proc(1, stderr="rejected: non-fast-forward")
 
-    with patch("auto_dev_loop.orchestrator.asyncio.create_subprocess_exec", return_value=push_proc):
+    with patch("auto_dev_loop.pr.asyncio.create_subprocess_exec", return_value=push_proc):
         with pytest.raises(RuntimeError, match="git push failed"):
             await create_pr(_issue(), Path("/tmp/wt"))
 
@@ -109,6 +134,6 @@ async def test_create_pr_success():
     pr_proc = _mock_proc(0, stdout="https://github.com/owner/repo/pull/99")
 
     procs = [push_proc, pr_proc]
-    with patch("auto_dev_loop.orchestrator.asyncio.create_subprocess_exec", side_effect=procs):
+    with patch("auto_dev_loop.pr.asyncio.create_subprocess_exec", side_effect=procs):
         pr_number = await create_pr(_issue(), Path("/tmp/wt"))
     assert pr_number == 99
