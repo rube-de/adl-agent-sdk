@@ -135,14 +135,15 @@ class TelegramBot:
                     feedback=reply.text,
                 ))
 
-        self._poller.on_callback("adl:", handle_callback)
+        handler_id = f"esc:{issue.id}:{stage.ref}"
+        self._poller.on_callback(handler_id, "adl:", handle_callback)
 
         try:
             return await asyncio.wait_for(decision, timeout=self._config.human_timeout)
         except asyncio.TimeoutError:
             return HumanDecision(action="timeout")
         finally:
-            self._poller._callback_handlers.pop("adl:", None)
+            self._poller._callback_handlers.pop(handler_id, None)
             self._poller._reply_handlers.pop(msg.message_id, None)
 
     # --- Notifications ---

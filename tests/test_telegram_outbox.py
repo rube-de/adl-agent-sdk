@@ -74,3 +74,54 @@ async def test_send_returns_future():
     drain_task.cancel()
 
     assert result is not None
+
+
+@pytest.mark.asyncio
+async def test_retry_after_edit_preserves_coalescing():
+    """Edit that hits RetryAfter is re-queued; a subsequent edit for the same
+    message coalesces so only one successful call is made with the latest text."""
+    from auto_dev_loop.telegram.models import RetryAfter
+
+    # Use a retry_after long enough that we can enqueue a second edit before
+    # drain retries, but short enough the test finishes quickly.
+    RETRY_DELAY = 0.3
+
+    class RetryOnceClient:
+        def __init__(self):
+            self.calls = []
+            self._edit_count = 0
+
+        async def edit_message_text(self, **kw):
+            self._edit_count += 1
+            if self._edit_count == 1:
+                raise RetryAfter(retry_after=RETRY_DELAY)
+            self.calls.append(("edit_message_text", kw))
+
+        async def send_message(self, **kw):
+            self.calls.append(("send_message", kw))
+
+            class FakeMsg:
+                message_id = len(self.calls)
+            return FakeMsg()
+
+    client = RetryOnceClient()
+    outbox = TelegramOutbox(client)
+
+    # First edit — drain will dispatch it, hit RetryAfter, and re-queue it.
+    await outbox.enqueue_edit(1, 100, "text v1")
+
+    drain_task = asyncio.create_task(outbox.drain_loop())
+    # Allow drain to attempt the first dispatch and receive RetryAfter.
+    await asyncio.sleep(0.05)
+
+    # At this point the item is back in _pending_edits (with retry_at in the
+    # future).  Enqueueing a second edit for the same key coalesces into it.
+    await outbox.enqueue_edit(1, 100, "text v2")
+
+    # Wait past the retry window so drain can re-dispatch the coalesced edit.
+    await asyncio.sleep(RETRY_DELAY + 0.1)
+    drain_task.cancel()
+
+    edit_calls = [c for c in client.calls if c[0] == "edit_message_text"]
+    assert len(edit_calls) == 1
+    assert edit_calls[0][1]["text"] == "text v2"

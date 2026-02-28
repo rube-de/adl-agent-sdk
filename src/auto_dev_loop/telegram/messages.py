@@ -17,7 +17,9 @@ def build_progress_message(
     total_elapsed: str,
 ) -> str:
     """Build live-updating progress card. Returns HTML."""
-    lines = [f"<b>{issue.repo} #{issue.number}</b> — {workflow.id}\n"]
+    repo = html.escape(issue.repo)
+    wf_id = html.escape(workflow.id)
+    lines = [f"<b>{repo} #{issue.number}</b> — {wf_id}\n"]
 
     for stage in workflow.stages:
         state = stage_states.get(stage.ref)
@@ -49,12 +51,14 @@ def build_escalation_message(
     emoji = "🔒" if reason == "security_veto" else "⚠️"
     title = reason.replace("_", " ").title()
 
-    feedback = getattr(verdict, "feedback", None) or "No feedback provided."
+    raw_feedback = getattr(verdict, "feedback", None) or "No feedback provided."
+    feedback = html.escape(raw_feedback)
     iteration = getattr(verdict, "iteration", 1)
+    repo = html.escape(issue.repo)
 
     text = (
-        f"{emoji} <b>{title}</b> — {issue.repo} #{issue.number}\n\n"
-        f"Stage: <code>{stage.ref}</code>\n"
+        f"{emoji} <b>{title}</b> — {repo} #{issue.number}\n\n"
+        f"Stage: <code>{html.escape(stage.ref)}</code>\n"
         f"Iteration: {iteration}/{stage.maxIterations}\n\n"
         f"<blockquote>{feedback}</blockquote>"
     )
@@ -79,17 +83,21 @@ def build_escalation_message(
 
 def build_completion_message(issue: Issue, pr_url: str) -> str:
     """Build PR-created notification."""
+    repo = html.escape(issue.repo)
+    safe_url = html.escape(pr_url)
     return (
-        f"✅ <b>PR Created</b> — {issue.repo} #{issue.number}\n\n"
-        f'<a href="{pr_url}">{pr_url}</a>'
+        f"✅ <b>PR Created</b> — {repo} #{issue.number}\n\n"
+        f'<a href="{safe_url}">{safe_url}</a>'
     )
 
 
 def build_error_message(issue: Issue, error: str) -> str:
     """Build error notification."""
+    repo = html.escape(issue.repo)
+    safe_error = html.escape(error[:500])
     return (
-        f"🔥 <b>Error</b> — {issue.repo} #{issue.number}\n\n"
-        f"<code>{error[:500]}</code>"
+        f"🔥 <b>Error</b> — {repo} #{issue.number}\n\n"
+        f"<code>{safe_error}</code>"
     )
 
 

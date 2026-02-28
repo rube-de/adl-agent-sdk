@@ -23,12 +23,17 @@ class TelegramPoller:
         self._api = bot_api
         self._offset: int = 0
         self._seen: set[int] = set()
-        self._callback_handlers: dict[str, CallbackHandler] = {}
+        # Keyed by unique handler_id; value is (prefix, handler).
+        self._callback_handlers: dict[str, tuple[str, CallbackHandler]] = {}
         self._reply_handlers: dict[int, ReplyHandler] = {}
 
-    def on_callback(self, prefix: str, handler: CallbackHandler) -> None:
-        """Register handler for callback_data starting with prefix."""
-        self._callback_handlers[prefix] = handler
+    def on_callback(self, handler_id: str, prefix: str, handler: CallbackHandler) -> None:
+        """Register handler for callback_data starting with prefix.
+
+        handler_id must be unique per registration (e.g. 'esc:42:plan').
+        Multiple handlers can share the same prefix.
+        """
+        self._callback_handlers[handler_id] = (prefix, handler)
 
     def on_reply_to(self, message_id: int, handler: ReplyHandler) -> None:
         """Register one-shot handler for replies to a specific message."""
@@ -63,7 +68,7 @@ class TelegramPoller:
     async def _route_callback(self, cb: CallbackQuery) -> None:
         if not cb.data:
             return
-        for prefix, handler in self._callback_handlers.items():
+        for handler_id, (prefix, handler) in self._callback_handlers.items():
             if cb.data.startswith(prefix):
                 try:
                     await handler(cb)

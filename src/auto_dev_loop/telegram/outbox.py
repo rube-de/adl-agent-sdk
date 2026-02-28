@@ -83,15 +83,21 @@ class TelegramOutbox:
 
             # For edits, always use the latest coalesced version
             if item.message_key:
-                if item.message_key in self._pending_edits:
-                    item = self._pending_edits.pop(item.message_key)
-                else:
+                if item.message_key not in self._pending_edits:
                     continue
-
-            # Honor RetryAfter backoff
-            now = time.monotonic()
-            if item.retry_at > now:
-                await asyncio.sleep(item.retry_at - now)
+                # Honor RetryAfter backoff BEFORE popping so that new
+                # enqueue_edit calls arriving during the sleep can still
+                # coalesce into _pending_edits[key].
+                now = time.monotonic()
+                pending = self._pending_edits[item.message_key]
+                if pending.retry_at > now:
+                    await asyncio.sleep(pending.retry_at - now)
+                item = self._pending_edits.pop(item.message_key)
+            else:
+                # Honor RetryAfter backoff
+                now = time.monotonic()
+                if item.retry_at > now:
+                    await asyncio.sleep(item.retry_at - now)
 
             try:
                 result = await getattr(self._client, item.method)(**item.kwargs)
@@ -99,6 +105,8 @@ class TelegramOutbox:
                     item.future.set_result(result)
             except RetryAfter as e:
                 item.retry_at = time.monotonic() + e.retry_after
+                if item.message_key:
+                    self._pending_edits[item.message_key] = item
                 await self._queue.put(item)
             except (BotApiError, Exception) as e:
                 log.warning(f"Outbox item failed: {e}")

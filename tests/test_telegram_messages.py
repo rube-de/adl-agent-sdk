@@ -106,3 +106,47 @@ def test_security_message_empty_list():
     text = build_security_message(None, [])
     assert isinstance(text, str)
     assert "0 commands blocked" in text
+
+
+def test_escalation_message_escapes_feedback():
+    """HTML in verdict feedback must be entity-escaped, not injected raw."""
+    stage = StageConfig(ref="security", agent="sec", canVeto=True)
+
+    class FakeVerdict:
+        feedback = "<script>alert(1)</script>"
+        iteration = 1
+
+    text, _ = build_escalation_message(_issue(), stage, FakeVerdict(), "security_veto")
+    assert "<script>" not in text
+    assert "&lt;script&gt;" in text
+
+
+def test_error_message_escapes_html():
+    """HTML characters in the error string must be entity-escaped.
+
+    The template itself uses <b>Error</b>, so we verify the user-supplied
+    tags are escaped by checking for the entity forms and confirming the raw
+    tag does not appear inside the <code> block.
+    """
+    text = build_error_message(_issue(), "Error: <b>bold</b> & more")
+    # The user-supplied <b> must be entity-escaped
+    assert "&lt;b&gt;" in text
+    assert "&amp;" in text
+    # The code block must not contain a raw <b> from user input
+    code_start = text.index("<code>")
+    code_end = text.index("</code>")
+    code_content = text[code_start:code_end]
+    assert "<b>" not in code_content
+
+
+def test_completion_message_escapes_url():
+    """Ampersands in the PR URL must be entity-escaped in HTML output."""
+    text = build_completion_message(_issue(), "https://example.com/a?b=1&c=2")
+    assert "&amp;" in text
+
+
+def test_progress_message_escapes_repo():
+    """A repo name containing HTML tags must not appear as raw tags."""
+    issue = Issue(id=1, number=99, repo="<b>evil</b>/repo", title="t", body="b")
+    text = build_progress_message(issue, _workflow(), {}, "0s")
+    assert "<b>evil</b>" not in text
