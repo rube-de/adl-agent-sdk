@@ -36,6 +36,9 @@ class FakeDispatcher(StageDispatcher):
     async def dispatch_multi_review(self, stage, issue, prior_outputs):
         return self._results.get(stage.ref, "APPROVED")
 
+    async def dispatch_infrastructure(self, stage, issue, prior_outputs):
+        return self._results.get(stage.ref, "APPROVED")
+
     async def escalate_to_human(self, issue, stage, verdict, reason):
         return "approved"
 
@@ -185,3 +188,44 @@ async def test_team_stage_dispatches():
     dispatcher = FakeDispatcher({"dev": "APPROVED"})
     result = await execute_workflow(wf, _issue(), dispatcher)
     assert result.status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_loop_target_reruns_target_stage():
+    """F11: loopTarget should jump back and re-run the target stage."""
+    call_log = []
+
+    class TrackingDispatcher(FakeDispatcher):
+        async def dispatch_single(self, stage, issue, prior_outputs):
+            call_log.append(stage.ref)
+            if stage.ref == "review" and call_log.count("review") == 1:
+                return "## Feedback\nFix the plan\n\nNEEDS_REVISION"
+            return "APPROVED"
+
+    wf = _workflow(
+        StageConfig(ref="plan", agent="architect"),
+        StageConfig(ref="review", agent="reviewer", loopTarget="plan", maxIterations=3),
+    )
+    result = await execute_workflow(wf, _issue(), TrackingDispatcher({}))
+    assert result.status == "completed"
+    # Expect: plan -> review (reject) -> plan (re-run) -> review (approve)
+    assert call_log == ["plan", "review", "plan", "review"]
+
+
+@pytest.mark.asyncio
+async def test_infrastructure_stage_dispatches():
+    """Infrastructure stages should call dispatch_infrastructure."""
+    dispatched = []
+
+    class InfraDispatcher(FakeDispatcher):
+        async def dispatch_infrastructure(self, stage, issue, prior_outputs):
+            dispatched.append(stage.ref)
+            return "APPROVED"
+
+    wf = _workflow(
+        StageConfig(ref="dev", agent="developer"),
+        StageConfig(ref="create_pr", agent="_infra", type="infrastructure"),
+    )
+    result = await execute_workflow(wf, _issue(), InfraDispatcher({}))
+    assert result.status == "completed"
+    assert dispatched == ["create_pr"]
