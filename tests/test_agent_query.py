@@ -6,6 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from auto_dev_loop.agent_query import agent_query, build_query_options
+from auto_dev_loop.hooks import CommandGuard
 from auto_dev_loop.models import AgentDef, Config, TelegramConfig
 
 
@@ -35,6 +36,7 @@ def test_build_query_options():
     assert opts["cwd"] == "/tmp/worktree"
     assert opts["max_turns"] == 30
     assert "Bash" in opts["allowed_tools"]
+    assert opts["permission_mode"] == "default"
 
 
 def test_build_query_options_resolves_model():
@@ -57,6 +59,20 @@ def test_build_query_options_has_bash_hook():
     opts = build_query_options(agent, Path("/tmp/wt"), _config())
     assert "hooks" in opts
     assert "bash_safety" in opts["hooks"]
+    assert isinstance(opts["hooks"]["bash_safety"], CommandGuard)
+
+
+def test_build_query_options_uses_provided_guard():
+    agent = _agent()
+    custom_guard = CommandGuard()
+    opts = build_query_options(agent, Path("/tmp/wt"), _config(), guard=custom_guard)
+    assert opts["hooks"]["bash_safety"] is custom_guard
+
+
+def test_build_query_options_creates_default_guard():
+    agent = _agent()
+    opts = build_query_options(agent, Path("/tmp/wt"), _config())
+    assert isinstance(opts["hooks"]["bash_safety"], CommandGuard)
 
 
 @pytest.mark.asyncio
@@ -76,3 +92,25 @@ async def test_agent_query_collects_text():
         )
     assert "Hello" in result
     assert "world" in result
+
+
+@pytest.mark.asyncio
+async def test_agent_query_passes_guard():
+    agent = _agent()
+    custom_guard = CommandGuard()
+    captured_opts: dict = {}
+
+    async def fake_query(prompt, **kwargs):
+        captured_opts.update(kwargs)
+        yield {"type": "text", "text": "done"}
+
+    with patch("claude_agent_sdk.query", side_effect=fake_query, create=True):
+        await agent_query(
+            agent_def=agent,
+            prompt="run tests",
+            worktree=Path("/tmp/wt"),
+            config=_config(),
+            guard=custom_guard,
+        )
+
+    assert captured_opts["hooks"]["bash_safety"] is custom_guard

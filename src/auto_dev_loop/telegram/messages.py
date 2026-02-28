@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import html
+
 from ..models import Issue, StageState
 from ..workflow_loader import WorkflowConfig, StageConfig
 from .callbacks import encode_callback
@@ -89,3 +91,27 @@ def build_error_message(issue: Issue, error: str) -> str:
         f"🔥 <b>Error</b> — {issue.repo} #{issue.number}\n\n"
         f"<code>{error[:500]}</code>"
     )
+
+
+def build_security_message(
+    issue: Issue | None,
+    blocked_commands: list[dict],
+) -> str:
+    """Build security alert for blocked commands. Returns HTML."""
+    count = len(blocked_commands)
+    header = f"🛡 <b>Security Alert</b> — {count} command{'s' if count != 1 else ''} blocked"
+    if issue:
+        header += f" ({issue.repo} #{issue.number})"
+
+    lines = [header, ""]
+    for entry in blocked_commands[:5]:  # cap at 5 to avoid message size limits
+        cmd = html.escape(entry.get("command", "")[:80])
+        reason = html.escape(entry.get("reason", "unknown"))
+        lines.append(f"<code>{cmd}</code>")
+        lines.append(f"  ↳ {reason}")
+        lines.append("")
+
+    if count > 5:
+        lines.append(f"<i>…and {count - 5} more</i>")
+
+    return "\n".join(lines)

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .agent_loader import load_agents
 from .agent_query import agent_query
+from .hooks import CommandGuard
 from .models import Config, Issue, PlanResult
 from .review_parser import parse_review_verdict
 
@@ -37,6 +38,7 @@ async def plan_loop(
     issue: Issue,
     worktree: Path,
     config: Config,
+    guard: CommandGuard | None = None,
 ) -> PlanResult:
     """Run the plan loop: architect -> reviewer -> iterate until approved."""
     agents = load_agents(Path(config.defaults.agents_dir))
@@ -52,6 +54,7 @@ async def plan_loop(
             prompt=build_architect_prompt(issue, plan, feedback),
             worktree=worktree,
             config=config,
+            guard=guard,
         )
 
         review_output = await agent_query(
@@ -59,6 +62,7 @@ async def plan_loop(
             prompt=plan,
             worktree=worktree,
             config=config,
+            guard=guard,
         )
 
         verdict = parse_review_verdict(review_output)

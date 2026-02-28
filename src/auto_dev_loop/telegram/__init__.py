@@ -18,6 +18,7 @@ from .messages import (
     build_error_message,
     build_escalation_message,
     build_progress_message,
+    build_security_message,
 )
 from .models import CallbackQuery, Message
 from .outbox import TelegramOutbox
@@ -152,6 +153,17 @@ class TelegramBot:
 
     async def notify_error(self, issue: Issue, error: str) -> None:
         text = build_error_message(issue, error)
+        await self._outbox.enqueue_send(self._chat_id, text, parse_mode="HTML")
+
+    async def notify_security(
+        self,
+        issue: Issue | None,
+        blocked_commands: list[dict],
+    ) -> None:
+        """Send a security alert for blocked commands."""
+        if not blocked_commands:
+            return
+        text = build_security_message(issue, blocked_commands)
         await self._outbox.enqueue_send(self._chat_id, text, parse_mode="HTML")
 
     def clear_progress(self, issue_id: int) -> None:

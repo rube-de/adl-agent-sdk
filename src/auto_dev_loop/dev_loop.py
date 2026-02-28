@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .agent_loader import load_agents
 from .agent_query import agent_query
+from .hooks import CommandGuard
 from .models import Config, DevResult, Issue
 from .multi_model import multi_model_review
 
@@ -32,6 +33,7 @@ async def run_agent_team(
     worktree: Path,
     config: Config,
     cycle: int,
+    guard: CommandGuard | None = None,
 ) -> TeamResult:
     """Run Agent Teams: orchestrator coordinates implementation.
 
@@ -49,6 +51,7 @@ async def run_agent_team(
         prompt=orchestrator_prompt,
         worktree=worktree,
         config=config,
+        guard=guard,
     )
 
     tests_passing = "TESTS_PASSING" in output
@@ -69,6 +72,7 @@ async def dev_loop(
     plan: str,
     worktree: Path,
     config: Config,
+    guard: CommandGuard | None = None,
 ) -> DevResult:
     """Run the dev loop: agent team -> multi-model review -> iterate."""
     agents = load_agents(Path(config.defaults.agents_dir))
@@ -81,6 +85,7 @@ async def dev_loop(
         team_result = await run_agent_team(
             issue=issue, plan=plan, agents=agents,
             worktree=worktree, config=config, cycle=cycle,
+            guard=guard,
         )
 
         if not team_result.tests_passing:
