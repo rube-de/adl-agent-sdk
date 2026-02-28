@@ -226,3 +226,22 @@ def test_load_real_workflows():
     assert set(workflows.keys()) == expected
     for wf_id, wf in workflows.items():
         assert wf.stages, f"{wf_id} has no stages"
+
+
+def test_all_workflow_agents_exist():
+    """F31: Every agent referenced in workflow YAMLs must have a definition."""
+    agents_dir = Path(__file__).parent.parent / "agents"
+    workflows_dir = Path(__file__).parent.parent / "workflows"
+
+    if not agents_dir.exists() or not workflows_dir.exists():
+        pytest.skip("agents/ or workflows/ directory not found")
+
+    agents = load_agents(agents_dir)
+    workflows = load_all_workflows(workflows_dir)
+
+    all_errors: list[str] = []
+    for wf_id, wf in workflows.items():
+        errors = validate_workflow(wf, agents)
+        all_errors.extend(f"{wf_id}: {e}" for e in errors)
+
+    assert all_errors == [], "Validation errors:\n" + "\n".join(all_errors)
