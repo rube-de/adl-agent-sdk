@@ -1,0 +1,228 @@
+"""Tests for workflow YAML loading and validation."""
+
+from pathlib import Path
+
+import pytest
+
+from auto_dev_loop.workflow_loader import (
+    load_workflow,
+    load_all_workflows,
+    validate_workflow,
+    WorkflowLoadError,
+    StageConfig,
+    TeamMemberConfig,
+    WorkflowConfig,
+)
+from auto_dev_loop.agent_loader import load_agents
+from auto_dev_loop.models import AgentDef
+
+
+BUG_FIX_YAML = """\
+id: bug_fix
+description: Bug fix — lean planning, focused build, fast turnaround
+
+stages:
+  - ref: plan
+    agent: architect
+
+  - ref: plan_review
+    agent: plan_reviewer
+    loopTarget: plan
+    maxIterations: 1
+
+  - ref: dev
+    type: team
+    agent: orchestrator
+    team:
+      tester:
+        agent: tester
+        model_role: smol
+      developer:
+        agent: developer
+        model_role: default
+
+  - ref: multi_review
+    agent: reviewer
+    reviewers: [claude, gemini, codex]
+    loopTarget: dev
+    maxIterations: 3
+"""
+
+FEATURE_YAML = """\
+id: feature
+description: Feature implementation
+
+stages:
+  - ref: research
+    agent: researcher
+    optional: true
+    condition: unknowns_exist
+
+  - ref: plan
+    agent: architect
+
+  - ref: plan_review
+    agent: plan_reviewer
+    loopTarget: plan
+    maxIterations: 2
+
+  - ref: dev
+    type: team
+    agent: orchestrator
+    team:
+      tester:
+        agent: tester
+        model_role: smol
+      developer:
+        agent: developer
+        model_role: default
+
+  - ref: multi_review
+    agent: reviewer
+    reviewers: [claude, gemini, codex]
+    loopTarget: dev
+    maxIterations: 5
+
+  - ref: security
+    agent: security_reviewer
+    optional: true
+    condition: security_relevant
+    canVeto: true
+"""
+
+
+def test_load_bug_fix_workflow(tmp_workflows_dir: Path):
+    (tmp_workflows_dir / "bug_fix.yaml").write_text(BUG_FIX_YAML)
+    wf = load_workflow(tmp_workflows_dir / "bug_fix.yaml")
+    assert wf.id == "bug_fix"
+    assert len(wf.stages) == 4
+    assert wf.stages[0].ref == "plan"
+    assert wf.stages[0].agent == "architect"
+    assert wf.stages[0].type == "single"
+
+
+def test_load_team_stage(tmp_workflows_dir: Path):
+    (tmp_workflows_dir / "bug_fix.yaml").write_text(BUG_FIX_YAML)
+    wf = load_workflow(tmp_workflows_dir / "bug_fix.yaml")
+    dev = wf.stages[2]
+    assert dev.type == "team"
+    assert "tester" in dev.team
+    assert dev.team["tester"].agent == "tester"
+    assert dev.team["tester"].model_role == "smol"
+    assert dev.team["developer"].model_role == "default"
+
+
+def test_load_optional_stage(tmp_workflows_dir: Path):
+    (tmp_workflows_dir / "feature.yaml").write_text(FEATURE_YAML)
+    wf = load_workflow(tmp_workflows_dir / "feature.yaml")
+    research = wf.stages[0]
+    assert research.optional is True
+    assert research.condition == "unknowns_exist"
+
+
+def test_load_veto_stage(tmp_workflows_dir: Path):
+    (tmp_workflows_dir / "feature.yaml").write_text(FEATURE_YAML)
+    wf = load_workflow(tmp_workflows_dir / "feature.yaml")
+    security = wf.stages[-1]
+    assert security.canVeto is True
+
+
+def test_load_loop_target(tmp_workflows_dir: Path):
+    (tmp_workflows_dir / "bug_fix.yaml").write_text(BUG_FIX_YAML)
+    wf = load_workflow(tmp_workflows_dir / "bug_fix.yaml")
+    assert wf.stages[1].loopTarget == "plan"
+    assert wf.stages[3].loopTarget == "dev"
+
+
+def test_load_reviewers(tmp_workflows_dir: Path):
+    (tmp_workflows_dir / "bug_fix.yaml").write_text(BUG_FIX_YAML)
+    wf = load_workflow(tmp_workflows_dir / "bug_fix.yaml")
+    assert wf.stages[3].reviewers == ["claude", "gemini", "codex"]
+
+
+def test_load_all_workflows(tmp_workflows_dir: Path):
+    (tmp_workflows_dir / "bug_fix.yaml").write_text(BUG_FIX_YAML)
+    (tmp_workflows_dir / "feature.yaml").write_text(FEATURE_YAML)
+    workflows = load_all_workflows(tmp_workflows_dir)
+    assert "bug_fix" in workflows
+    assert "feature" in workflows
+
+
+def test_load_invalid_yaml(tmp_workflows_dir: Path):
+    (tmp_workflows_dir / "bad.yaml").write_text("not: [valid: yaml: {{")
+    with pytest.raises(WorkflowLoadError):
+        load_workflow(tmp_workflows_dir / "bad.yaml")
+
+
+def test_stage_defaults():
+    stage = StageConfig(ref="test", agent="tester")
+    assert stage.type == "single"
+    assert stage.optional is False
+    assert stage.maxIterations == 3
+    assert stage.canVeto is False
+    assert stage.reviewers == []
+    assert stage.team == {}
+
+
+# --- Validation tests ---
+
+def _make_agents(*names: str) -> dict[str, AgentDef]:
+    return {
+        name: AgentDef(name=name, description="", system_prompt="", tools=["Bash"])
+        for name in names
+    }
+
+
+def test_validate_valid_workflow(tmp_workflows_dir: Path):
+    (tmp_workflows_dir / "bug_fix.yaml").write_text(BUG_FIX_YAML)
+    wf = load_workflow(tmp_workflows_dir / "bug_fix.yaml")
+    agents = _make_agents("architect", "plan_reviewer", "orchestrator", "tester", "developer", "reviewer")
+    errors = validate_workflow(wf, agents)
+    assert errors == []
+
+
+def test_validate_missing_agent(tmp_workflows_dir: Path):
+    (tmp_workflows_dir / "bug_fix.yaml").write_text(BUG_FIX_YAML)
+    wf = load_workflow(tmp_workflows_dir / "bug_fix.yaml")
+    agents = _make_agents("architect")  # Missing most agents
+    errors = validate_workflow(wf, agents)
+    assert any("plan_reviewer" in e for e in errors)
+    assert any("reviewer" in e for e in errors)
+
+
+def test_validate_bad_loop_target():
+    wf = WorkflowConfig(
+        id="bad",
+        description="",
+        stages=[
+            StageConfig(ref="review", agent="reviewer", loopTarget="nonexistent"),
+        ],
+    )
+    agents = _make_agents("reviewer")
+    errors = validate_workflow(wf, agents)
+    assert any("nonexistent" in e for e in errors)
+
+
+def test_validate_optional_without_condition():
+    wf = WorkflowConfig(
+        id="bad",
+        description="",
+        stages=[
+            StageConfig(ref="opt", agent="scout", optional=True),
+        ],
+    )
+    agents = _make_agents("scout")
+    errors = validate_workflow(wf, agents)
+    assert any("condition" in e for e in errors)
+
+
+def test_load_real_workflows():
+    """Verify all workflow YAML files in workflows/ are valid."""
+    workflows_dir = Path(__file__).parent.parent / "workflows"
+    if not workflows_dir.exists() or not list(workflows_dir.glob("*.yaml")):
+        pytest.skip("workflows/ directory not populated yet")
+    workflows = load_all_workflows(workflows_dir)
+    expected = {"bug_fix", "feature", "documentation", "security_audit", "ops_change"}
+    assert set(workflows.keys()) == expected
+    for wf_id, wf in workflows.items():
+        assert wf.stages, f"{wf_id} has no stages"
