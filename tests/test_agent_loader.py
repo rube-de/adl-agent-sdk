@@ -113,6 +113,7 @@ def test_load_real_agents():
     expected = {
         "architect", "plan_reviewer", "tester", "developer",
         "reviewer", "pr_fixer", "feedback_applier", "orchestrator",
+        "researcher", "security_reviewer",
     }
     assert set(agents.keys()) == expected
     for name, agent in agents.items():
