@@ -37,3 +37,11 @@ stages:
     optional: true
     condition: security_relevant
     canVeto: true
+
+  - ref: create_pr
+    type: infrastructure
+    agent: _infra
+
+  - ref: pr_review
+    type: infrastructure
+    agent: _infra

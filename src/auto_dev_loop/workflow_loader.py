@@ -99,7 +99,7 @@ def validate_workflow(
 
     for stage in wf.stages:
         # Agent must exist (skip check for team-type stages where orchestrator may not be in agents)
-        if stage.agent not in agents and stage.type != "team":
+        if stage.agent not in agents and stage.type not in ("team", "infrastructure"):
             errors.append(f"Stage '{stage.ref}': agent '{stage.agent}' not found in agents/")
 
         # loopTarget must reference a valid stage

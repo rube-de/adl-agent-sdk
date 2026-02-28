@@ -26,3 +26,11 @@ stages:
     reviewers: [claude, gemini, codex]
     loopTarget: dev
     maxIterations: 3
+
+  - ref: create_pr
+    type: infrastructure
+    agent: _infra
+
+  - ref: pr_review
+    type: infrastructure
+    agent: _infra
