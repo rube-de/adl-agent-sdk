@@ -45,7 +45,7 @@ class TelegramOutbox:
 
     async def enqueue_send(self, chat_id: int, text: str, **kw) -> asyncio.Future:
         """Enqueue a new message. Returns Future that resolves to Message."""
-        future: asyncio.Future = asyncio.get_event_loop().create_future()
+        future: asyncio.Future = asyncio.get_running_loop().create_future()
         await self._queue.put(OutboxItem(
             priority=Priority.SEND, sequence=self._next_seq(),
             method="send_message",

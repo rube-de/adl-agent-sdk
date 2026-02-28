@@ -21,7 +21,7 @@ def test_encode_feedback():
 
 
 def test_encode_invalid_action():
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError, match="Invalid action"):
         encode_callback("invalid", 1, "plan")
 
 
@@ -50,3 +50,7 @@ def test_decode_wrong_part_count():
 
 def test_decode_invalid_action():
     assert decode_callback("adl:invalid:1:plan") is None
+
+
+def test_decode_non_numeric_issue_id():
+    assert decode_callback("adl:approve:abc:plan") is None

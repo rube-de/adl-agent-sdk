@@ -106,7 +106,7 @@ async def process_issue(
     guard = create_default_guard(handler=LoggingSecurityHandler())
 
     try:
-        create_worktree(_repo_path, worktree_path, branch)
+        await create_worktree(_repo_path, worktree_path, branch)
         log.info(f"Processing {issue.repo}#{issue.number} in {worktree_path}")
 
         # Select and load workflow
@@ -156,6 +156,6 @@ async def process_issue(
         # Flush any remaining events from the failed/interrupted phase
         await _flush_security_events(guard, issue, telegram)
         try:
-            delete_worktree(_repo_path, worktree_path)
+            await delete_worktree(_repo_path, worktree_path)
         except Exception:
             log.warning(f"Failed to clean up worktree {worktree_path}")

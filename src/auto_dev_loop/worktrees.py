@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-import subprocess
+import asyncio
+import shutil
 from pathlib import Path
 
 
@@ -10,54 +11,60 @@ class WorktreeError(Exception):
     pass
 
 
-def create_worktree(repo_path: Path, worktree_path: Path, branch: str) -> None:
+async def create_worktree(repo_path: Path, worktree_path: Path, branch: str) -> None:
     """Create a git worktree with a new branch."""
     if worktree_path.exists():
         raise WorktreeError(f"Worktree path already exists: {worktree_path}")
 
     worktree_path.parent.mkdir(parents=True, exist_ok=True)
 
-    result = subprocess.run(
-        ["git", "worktree", "add", "-b", branch, str(worktree_path)],
-        cwd=repo_path,
-        capture_output=True,
-        text=True,
+    proc = await asyncio.create_subprocess_exec(
+        "git", "worktree", "add", "-b", branch, str(worktree_path),
+        cwd=str(repo_path),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
     )
-    if result.returncode != 0:
-        raise WorktreeError(f"Failed to create worktree: {result.stderr.strip()}")
+    _, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        raise WorktreeError(f"Failed to create worktree: {stderr.decode().strip()}")
 
 
-def delete_worktree(repo_path: Path, worktree_path: Path) -> None:
+async def delete_worktree(repo_path: Path, worktree_path: Path) -> None:
     """Remove a git worktree and prune."""
-    result = subprocess.run(
-        ["git", "worktree", "remove", "--force", str(worktree_path)],
-        cwd=repo_path,
-        capture_output=True,
-        text=True,
+    proc = await asyncio.create_subprocess_exec(
+        "git", "worktree", "remove", "--force", str(worktree_path),
+        cwd=str(repo_path),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
     )
-    if result.returncode != 0:
-        import shutil
+    await proc.communicate()
+    if proc.returncode != 0:
         if worktree_path.exists():
             shutil.rmtree(worktree_path)
-        subprocess.run(
-            ["git", "worktree", "prune"],
-            cwd=repo_path,
-            capture_output=True,
+        prune = await asyncio.create_subprocess_exec(
+            "git", "worktree", "prune",
+            cwd=str(repo_path),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
+        await prune.communicate()
 
 
-def list_worktrees(repo_path: Path) -> list[dict[str, str]]:
+async def list_worktrees(repo_path: Path) -> list[dict[str, str]]:
     """List all git worktrees for a repo."""
-    result = subprocess.run(
-        ["git", "worktree", "list", "--porcelain"],
-        cwd=repo_path,
-        capture_output=True,
-        text=True,
-        check=True,
+    proc = await asyncio.create_subprocess_exec(
+        "git", "worktree", "list", "--porcelain",
+        cwd=str(repo_path),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
     )
+    stdout, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        raise WorktreeError(f"Failed to list worktrees: {stderr.decode().strip()}")
+
     worktrees = []
     current: dict[str, str] = {}
-    for line in result.stdout.splitlines():
+    for line in stdout.decode().splitlines():
         if not line:
             if current:
                 worktrees.append(current)

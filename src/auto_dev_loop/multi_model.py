@@ -44,9 +44,14 @@ async def run_external_with_timeout(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    stdout, stderr = await asyncio.wait_for(
-        proc.communicate(), timeout=timeout,
-    )
+    try:
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(), timeout=timeout,
+        )
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.communicate()
+        raise
     if proc.returncode != 0:
         raise RuntimeError(f"External reviewer {cmd} failed: {stderr.decode()}")
     return stdout.decode()

@@ -38,10 +38,10 @@ class TelegramBot:
 
     def __init__(self, config: TelegramConfig):
         self._config = config
-        api = HttpBotClient(config.bot_token)
-        client = TelegramClient(api, chat_type=config.chat_type)
+        self._api = HttpBotClient(config.bot_token)
+        client = TelegramClient(self._api, chat_type=config.chat_type)
         self._outbox = TelegramOutbox(client)
-        self._poller = TelegramPoller(api)
+        self._poller = TelegramPoller(self._api)
         self._chat_id = config.chat_id
         self._progress_messages: dict[int, int] = {}
         self._tasks: list[asyncio.Task] = []
@@ -57,6 +57,7 @@ class TelegramBot:
         for task in self._tasks:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
+        await self._api.close()
 
     # --- Progress ---
 
@@ -106,7 +107,7 @@ class TelegramBot:
         if not msg:
             return HumanDecision(action="timeout", feedback="Failed to send escalation")
 
-        decision: asyncio.Future[HumanDecision] = asyncio.get_event_loop().create_future()
+        decision: asyncio.Future[HumanDecision] = asyncio.get_running_loop().create_future()
 
         async def handle_callback(cb: CallbackQuery) -> None:
             parsed = decode_callback(cb.data)

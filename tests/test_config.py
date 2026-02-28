@@ -102,6 +102,31 @@ workflow_selection:
     assert cfg.workflow_selection.label_map["bug"] == "bug_fix"
 
 
+def test_missing_telegram_key(tmp_config_file: Path):
+    """F30: Missing required key gives ConfigError, not raw KeyError."""
+    tmp_config_file.write_text("version: 3\ntelegram:\n  chat_id: 123\nrepos: []\n")
+    with pytest.raises(ConfigError, match="bot_token"):
+        load_config(tmp_config_file)
+
+
+def test_empty_bot_token_after_expansion(tmp_config_file: Path):
+    """F8: Env var expanding to empty string caught at config load."""
+    tmp_config_file.write_text(
+        "version: 3\ntelegram:\n  bot_token: '${DEFINITELY_NOT_SET_XYZ}'\n  chat_id: 1\nrepos: []\n"
+    )
+    with pytest.raises(ConfigError, match="must not be empty"):
+        load_config(tmp_config_file)
+
+
+def test_missing_repo_key(tmp_config_file: Path):
+    """F30: Missing required repo key gives ConfigError."""
+    tmp_config_file.write_text(
+        "version: 3\ntelegram:\n  bot_token: tok\n  chat_id: 1\nrepos:\n  - path: /tmp/r\n"
+    )
+    with pytest.raises(ConfigError, match="repos\\[0\\].*project_number"):
+        load_config(tmp_config_file)
+
+
 def test_load_config_with_custom_defaults(tmp_config_file: Path):
     config_text = MINIMAL_CONFIG + """
 defaults:

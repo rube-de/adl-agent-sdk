@@ -52,27 +52,36 @@ def load_config(path: Path) -> Config:
 
     # Parse telegram section
     tg = raw.get("telegram", {})
+    try:
+        bot_token = tg["bot_token"]
+        chat_id = tg["chat_id"]
+    except KeyError as e:
+        raise ConfigError(f"Missing required telegram config key: {e}") from None
+    if not bot_token:
+        raise ConfigError("telegram.bot_token must not be empty (check env var expansion)")
     telegram = TelegramConfig(
-        bot_token=tg["bot_token"],
-        chat_id=int(tg["chat_id"]),
+        bot_token=bot_token,
+        chat_id=int(chat_id),
         chat_type=tg.get("chat_type", "private"),
         human_timeout=tg.get("human_timeout", 3600),
         progress_updates=tg.get("progress_updates", True),
     )
 
     # Parse repos
-    repos = [
-        RepoConfig(
-            path=r["path"],
-            project_number=r["project_number"],
-            columns=r.get("columns", {
-                "source": "Ready for Dev",
-                "in_progress": "In Progress",
-                "done": "Done",
-            }),
-        )
-        for r in raw.get("repos", [])
-    ]
+    repos = []
+    for i, r in enumerate(raw.get("repos", [])):
+        try:
+            repos.append(RepoConfig(
+                path=r["path"],
+                project_number=r["project_number"],
+                columns=r.get("columns", {
+                    "source": "Ready for Dev",
+                    "in_progress": "In Progress",
+                    "done": "Done",
+                }),
+            ))
+        except KeyError as e:
+            raise ConfigError(f"Missing required key in repos[{i}]: {e}") from None
 
     # Parse defaults (merge with Defaults() to preserve unset defaults)
     raw_defaults = raw.get("defaults", {})

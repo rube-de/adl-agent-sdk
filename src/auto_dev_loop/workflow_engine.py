@@ -145,7 +145,7 @@ async def execute_workflow(
                 stage_idx += 1
                 continue
 
-        max_iter = stage.maxIterations or 3
+        max_iter = max(1, stage.maxIterations or 3)
         count = dispatch_count.get(stage.ref, 0)
 
         if not is_loopback_reentry and count >= max_iter:
