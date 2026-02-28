@@ -124,9 +124,19 @@ async def execute_workflow(
     stage_outputs: dict[str, str] = {}
     dispatch_count: dict[str, int] = {}
     stage_idx = 0
+    # When a loopTarget jump happens, this tracks the rejecting stage's ref.
+    # Stages re-entered via the jump don't increment their dispatch_count —
+    # only the rejecting stage owns the iteration budget for its loop cycle.
+    _jumped_from: str | None = None
 
     while stage_idx < len(workflow.stages):
         stage = workflow.stages[stage_idx]
+
+        # Clear the loopback marker once we reach the stage that triggered it
+        if _jumped_from and stage.ref == _jumped_from:
+            _jumped_from = None
+
+        is_loopback_reentry = _jumped_from is not None
 
         # Skip optional stages whose condition is false
         if stage.optional:
@@ -138,10 +148,10 @@ async def execute_workflow(
         max_iter = stage.maxIterations or 3
         count = dispatch_count.get(stage.ref, 0)
 
-        if count >= max_iter:
-            # This stage has exhausted its iteration budget across all loop-back passes
+        if not is_loopback_reentry and count >= max_iter:
+            # This stage has exhausted its iteration budget
             log.info(f"Stage {stage.ref} exhausted maxIterations={max_iter}")
-            last_output = stage_outputs.get(f"{stage.ref}_last_output", "")
+            last_output = stage_outputs.get(f"_{stage.ref}_last_output", "")
             last_feedback = stage_outputs.get(f"{stage.ref}_feedback", "")
             human_result = await dispatcher.escalate_to_human(
                 issue, stage,
@@ -155,9 +165,12 @@ async def execute_workflow(
                 return WorkflowResult(status="escalated", stage=stage.ref)
             continue
 
-        iteration = count + 1
-        log.info(f"Stage {stage.ref} iteration {iteration}/{max_iter}")
-        dispatch_count[stage.ref] = iteration
+        if not is_loopback_reentry:
+            iteration = count + 1
+            log.info(f"Stage {stage.ref} iteration {iteration}/{max_iter}")
+            dispatch_count[stage.ref] = iteration
+        else:
+            log.info(f"Stage {stage.ref} re-entry from loopTarget (not counted)")
 
         # Dispatch based on stage type
         if stage.type == "team":
@@ -169,8 +182,9 @@ async def execute_workflow(
         else:
             output = await dispatcher.dispatch_single(stage, issue, stage_outputs)
 
-        # Stash output for potential escalation after cap
-        stage_outputs[f"{stage.ref}_last_output"] = output
+        # Stash output for potential escalation after cap (prefixed with _ so
+        # _build_prompt filters it out of agent prompts)
+        stage_outputs[f"_{stage.ref}_last_output"] = output
 
         verdict = _parse_verdict(output)
 
@@ -196,6 +210,7 @@ async def execute_workflow(
             target_idx = _find_stage_index(workflow, stage.loopTarget)
             stage_outputs[f"{stage.ref}_feedback"] = verdict.feedback or ""
             log.info(f"Stage {stage.ref} rejected, jumping back to {stage.loopTarget}")
+            _jumped_from = stage.ref  # mark so intermediate stages don't count
             stage_idx = target_idx
             continue
 

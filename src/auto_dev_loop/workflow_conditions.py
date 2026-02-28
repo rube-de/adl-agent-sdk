@@ -9,6 +9,8 @@ Adding a new condition requires both a callable here and an entry in CONDITIONS.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from .models import Issue
 
 
@@ -40,7 +42,7 @@ def _code_review_needed(issue: Issue) -> bool:
     return True
 
 
-CONDITIONS: dict[str, callable] = {
+CONDITIONS: dict[str, Callable[[Issue], bool]] = {
     "unknowns_exist": _unknowns_exist,
     "security_relevant": _security_relevant,
     "deployment_needed": _deployment_needed,

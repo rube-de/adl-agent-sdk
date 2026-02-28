@@ -40,7 +40,7 @@ class FakeDispatcher(StageDispatcher):
         return self._results.get(stage.ref, "APPROVED")
 
     async def escalate_to_human(self, issue, stage, verdict, reason):
-        return "approved"
+        return "approve"
 
 
 # --- Condition tests ---
@@ -229,3 +229,62 @@ async def test_infrastructure_stage_dispatches():
     result = await execute_workflow(wf, _issue(), InfraDispatcher({}))
     assert result.status == "completed"
     assert dispatched == ["create_pr"]
+
+
+@pytest.mark.asyncio
+async def test_loopback_does_not_count_target_stage():
+    """Verify that loopTarget re-entries don't increment the target stage's dispatch count.
+
+    Without the fix, plan would exhaust its budget (count=3) before review (count=2),
+    causing an incorrect escalation at 'plan' instead of 'review'.
+    """
+    call_count = {"plan": 0, "review": 0}
+    escalated_at = {}
+
+    class CountingDispatcher(FakeDispatcher):
+        async def dispatch_single(self, stage, issue, prior_outputs):
+            call_count[stage.ref] = call_count.get(stage.ref, 0) + 1
+            if stage.ref == "review":
+                return "## Feedback\nBad plan\n\nNEEDS_REVISION"
+            return "APPROVED"
+
+        async def escalate_to_human(self, issue, stage, verdict, reason):
+            escalated_at["stage"] = stage.ref
+            return "timeout"
+
+    wf = _workflow(
+        StageConfig(ref="plan", agent="architect", maxIterations=3),
+        StageConfig(ref="review", agent="reviewer", loopTarget="plan", maxIterations=3),
+    )
+    result = await execute_workflow(wf, _issue(), CountingDispatcher({}))
+    assert result.status == "escalated"
+    # The rejecting stage (review) should escalate, not the target (plan)
+    assert escalated_at["stage"] == "review"
+    # review ran 3 times (its maxIterations)
+    assert call_count["review"] == 3
+    # plan ran 1 + 3 re-entries = 4 times, but only counted once
+    assert call_count["plan"] == 4
+
+
+@pytest.mark.asyncio
+async def test_internal_keys_prefixed_with_underscore():
+    """Verify that _last_output keys are prefixed with _ so _build_prompt filters them."""
+    seen_keys: list[list[str]] = []
+
+    class SpyDispatcher(FakeDispatcher):
+        async def dispatch_single(self, stage, issue, prior_outputs):
+            seen_keys.append(list(prior_outputs.keys()))
+            return "APPROVED"
+
+    wf = _workflow(
+        StageConfig(ref="plan", agent="architect"),
+        StageConfig(ref="review", agent="reviewer"),
+    )
+    await execute_workflow(wf, _issue(), SpyDispatcher({}))
+    review_keys = seen_keys[1]  # second dispatch sees prior outputs
+    # Approved output stored under bare ref
+    assert "plan" in review_keys
+    # Internal _last_output key uses _ prefix (so _build_prompt filters it)
+    internal_keys = [k for k in review_keys if "last_output" in k]
+    assert all(k.startswith("_") for k in internal_keys), \
+        f"Internal keys should be _-prefixed: {internal_keys}"
