@@ -167,6 +167,13 @@ async def test_veto_escalates():
     assert result.stage == "security"
 
 
+def test_conditions_registry_matches_loader():
+    """F36: Ensure engine and loader share the same condition names."""
+    from auto_dev_loop.workflow_engine import CONDITIONS
+    from auto_dev_loop.workflow_loader import CONDITIONS as LOADER_CONDITIONS
+    assert CONDITIONS == LOADER_CONDITIONS
+
+
 @pytest.mark.asyncio
 async def test_team_stage_dispatches():
     wf = _workflow(

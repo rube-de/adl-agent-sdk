@@ -13,6 +13,7 @@ from dataclasses import dataclass
 
 from .models import Issue, ReviewVerdict, WorkflowResult
 from .review_parser import parse_review_verdict
+from .workflow_conditions import CONDITIONS  # noqa: F401 — re-exported as public API
 from .workflow_loader import StageConfig, WorkflowConfig
 
 log = logging.getLogger(__name__)
@@ -59,47 +60,11 @@ class StageDispatcher(ABC):
 
 def evaluate_condition(condition: str, issue: Issue) -> bool:
     """Evaluate a named condition against an issue."""
-    evaluator = _CONDITIONS.get(condition)
+    evaluator = CONDITIONS.get(condition)
     if evaluator is None:
         log.warning(f"Unknown condition '{condition}', treating as False")
         return False
     return evaluator(issue)
-
-
-def _unknowns_exist(issue: Issue) -> bool:
-    return (
-        "?" in issue.body
-        or any(
-            w in issue.body.lower()
-            for w in ("unclear", "unknown", "investigate", "explore")
-        )
-    )
-
-
-def _security_relevant(issue: Issue) -> bool:
-    return (
-        "security" in issue.labels
-        or any(
-            w in issue.body.lower()
-            for w in ("auth", "crypto", "permissions", "cve", "vulnerability")
-        )
-    )
-
-
-def _deployment_needed(issue: Issue) -> bool:
-    return any(label in issue.labels for label in ("deploy", "ops", "infrastructure"))
-
-
-def _code_review_needed(issue: Issue) -> bool:
-    return True
-
-
-_CONDITIONS: dict[str, callable] = {
-    "unknowns_exist": _unknowns_exist,
-    "security_relevant": _security_relevant,
-    "deployment_needed": _deployment_needed,
-    "code_review_needed": _code_review_needed,
-}
 
 
 # --- Engine ---

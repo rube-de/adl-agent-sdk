@@ -8,19 +8,11 @@ from pathlib import Path
 import yaml
 
 from .models import AgentDef
+from .workflow_conditions import CONDITIONS  # noqa: F401 — re-exported for validation callers
 
 
 class WorkflowLoadError(Exception):
     pass
-
-
-# Named conditions — new conditions require a code change (intentional)
-CONDITIONS = {
-    "unknowns_exist",
-    "security_relevant",
-    "deployment_needed",
-    "code_review_needed",
-}
 
 
 @dataclass
