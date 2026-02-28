@@ -35,6 +35,7 @@ class RateLimiter:
             wait = (1.0 - self._buckets[chat_id]) / self._rate
             await asyncio.sleep(wait)
             self._buckets[chat_id] = 0.0
+            self._last_refill[chat_id] = time.monotonic()
         else:
             self._buckets[chat_id] -= 1.0
 

@@ -111,4 +111,4 @@ class TelegramOutbox:
             except (BotApiError, Exception) as e:
                 log.warning(f"Outbox item failed: {e}")
                 if item.future and not item.future.done():
-                    item.future.set_result(None)
+                    item.future.set_exception(e)

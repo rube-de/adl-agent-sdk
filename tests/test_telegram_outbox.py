@@ -5,6 +5,7 @@ import asyncio
 import pytest
 
 from auto_dev_loop.telegram.outbox import TelegramOutbox, Priority, OutboxItem
+from auto_dev_loop.telegram.models import BotApiError
 
 
 class FakeClient:
@@ -125,3 +126,24 @@ async def test_retry_after_edit_preserves_coalescing():
     edit_calls = [c for c in client.calls if c[0] == "edit_message_text"]
     assert len(edit_calls) == 1
     assert edit_calls[0][1]["text"] == "text v2"
+
+
+@pytest.mark.asyncio
+async def test_send_failure_propagates_exception():
+    """Exception from send_message is propagated to the returned future."""
+
+    class FailingClient(FakeClient):
+        async def send_message(self, **kw):
+            raise BotApiError(code=400, description="Bad Request")
+
+    client = FailingClient()
+    outbox = TelegramOutbox(client)
+
+    future = await outbox.enqueue_send(1, "test message")
+    drain_task = asyncio.create_task(outbox.drain_loop())
+
+    with pytest.raises(BotApiError) as exc_info:
+        await asyncio.wait_for(future, timeout=1.0)
+
+    assert exc_info.value.code == 400
+    drain_task.cancel()

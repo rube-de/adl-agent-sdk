@@ -34,7 +34,7 @@ class ReviewLoopResult:
 async def push_fixes(worktree: Path, issue: Issue) -> bool:
     """Stage, commit, and push fixes. Returns True if changes were pushed."""
     proc = await asyncio.create_subprocess_exec(
-        "git", "add", "-A",
+        "git", "add", "-u",
         cwd=str(worktree),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,

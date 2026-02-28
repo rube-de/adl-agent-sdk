@@ -27,6 +27,13 @@ from .poller import TelegramPoller
 log = logging.getLogger(__name__)
 
 
+def _suppress_exception(future: asyncio.Future) -> None:
+    """Consume exception on fire-and-forget futures to avoid 'exception was never retrieved' warnings."""
+    if future.cancelled():
+        return
+    future.exception()  # marks exception as retrieved
+
+
 @dataclass
 class HumanDecision:
     action: str    # "approve", "reject", "feedback", "timeout"
@@ -80,7 +87,11 @@ class TelegramBot:
             future = await self._outbox.enqueue_send(
                 self._chat_id, text, parse_mode="HTML",
             )
-            msg = await future
+            try:
+                msg = await future
+            except Exception:
+                log.warning("Failed to send progress message for issue %s", issue.id)
+                return
             if msg:
                 self._progress_messages[issue.id] = msg.message_id
 
@@ -103,7 +114,10 @@ class TelegramBot:
             ),
             parse_mode="HTML",
         )
-        msg = await future
+        try:
+            msg = await future
+        except Exception as exc:
+            return HumanDecision(action="timeout", feedback=f"Failed to send escalation: {exc}")
         if not msg:
             return HumanDecision(action="timeout", feedback="Failed to send escalation")
 
@@ -151,11 +165,13 @@ class TelegramBot:
 
     async def notify_completion(self, issue: Issue, pr_url: str) -> None:
         text = build_completion_message(issue, pr_url)
-        await self._outbox.enqueue_send(self._chat_id, text, parse_mode="HTML")
+        future = await self._outbox.enqueue_send(self._chat_id, text, parse_mode="HTML")
+        future.add_done_callback(_suppress_exception)
 
     async def notify_error(self, issue: Issue, error: str) -> None:
         text = build_error_message(issue, error)
-        await self._outbox.enqueue_send(self._chat_id, text, parse_mode="HTML")
+        future = await self._outbox.enqueue_send(self._chat_id, text, parse_mode="HTML")
+        future.add_done_callback(_suppress_exception)
 
     async def notify_security(
         self,
@@ -166,7 +182,8 @@ class TelegramBot:
         if not blocked_commands:
             return
         text = build_security_message(issue, blocked_commands)
-        await self._outbox.enqueue_send(self._chat_id, text, parse_mode="HTML")
+        future = await self._outbox.enqueue_send(self._chat_id, text, parse_mode="HTML")
+        future.add_done_callback(_suppress_exception)
 
     def clear_progress(self, issue_id: int) -> None:
         """Remove tracked progress message after issue completes."""

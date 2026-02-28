@@ -10,7 +10,6 @@ dependencies = [
     "pyyaml",
     "typer",
     "aiosqlite",
-    "aiofiles",
 ]
 
 [project.scripts]
