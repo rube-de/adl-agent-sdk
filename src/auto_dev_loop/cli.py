@@ -38,9 +38,8 @@ def run(
     ),
 ) -> None:
     """Start the Auto Dev Loop daemon."""
-    typer.echo(f"Config: {config}")
-    typer.echo("Daemon not yet implemented.")
-    raise typer.Exit(1)
+    from .main import run_daemon
+    run_daemon(str(config))
 
 
 @app.command()
