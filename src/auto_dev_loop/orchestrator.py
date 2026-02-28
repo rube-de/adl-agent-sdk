@@ -9,6 +9,7 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .branch import build_branch_name
 from .dev_loop import dev_loop, MaxDevCyclesError
 from .hooks import CommandGuard, LoggingSecurityHandler, SecurityEvent, create_default_guard
 from .models import Config, Issue
@@ -58,7 +59,7 @@ def build_pr_command(
 
 async def create_pr(issue: Issue, worktree: Path) -> int:
     """Create a PR via gh CLI, return PR number."""
-    branch = f"adl/{issue.number}-{issue.title[:30].replace(' ', '-').lower()}"
+    branch = build_branch_name(issue)
 
     proc = await asyncio.create_subprocess_exec(
         "git", "push", "-u", "origin", branch,
@@ -140,7 +141,7 @@ async def process_issue(
 ) -> ProcessResult:
     """Drive a single issue through the full lifecycle."""
     _repo_path = repo_path or Path(".")
-    branch = f"adl/{issue.number}-{issue.title[:30].replace(' ', '-').lower()}"
+    branch = build_branch_name(issue)
     worktree_path = _repo_path / ".worktrees" / branch
 
     guard = create_default_guard(handler=LoggingSecurityHandler())
