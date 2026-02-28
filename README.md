@@ -118,33 +118,44 @@ File-based escalation (`needs_human.json`) routed to Telegram. Triggers on secur
 ```
 adl-agent-sdk/
   pyproject.toml
+  justfile
   src/
     auto_dev_loop/
       cli.py                 # Typer CLI entry point
-      main.py                # asyncio event loop, daemon lifecycle
-      orchestrator.py        # delegates to workflow engine
-      workflow_engine.py     # stage interpreter loop
+      main.py                # asyncio daemon, polling loop
+      config.py              # YAML config loader with env var expansion
+      models.py              # core dataclasses (Config, Issue, AgentDef, etc.)
+      orchestrator.py        # issue lifecycle state machine
+      workflow_engine.py     # async stage interpreter loop
       workflow_loader.py     # YAML loading + validation
       workflow_router.py     # label-based workflow selection
-      plan_loop.py           # SDK Sequential plan loop
-      dev_loop.py            # SDK Agent Teams dev loop
-      review_loop.py         # PR review loop with backoff
-      multi_model.py         # multi-model review orchestration
-      review_parser.py       # APPROVED/NEEDS_REVISION parsing
-      agent_loader.py        # load agent defs from markdown
+      plan_loop.py           # sequential architect/reviewer iteration
+      dev_loop.py            # agent team dev loop with review cycles
+      review_loop.py         # PR review comment iteration with backoff
+      multi_model.py         # parallel multi-model review (asyncio.gather)
+      agent_query.py         # common SDK query wrapper (model resolution, hooks)
+      agent_loader.py        # load agent defs from markdown + frontmatter
       model_roles.py         # role → model resolution
-      hooks.py               # Bash safety hook
-      poller.py              # GitHub Projects V2 polling
-      telegram.py            # bot: send/receive/commands
-      state.py               # SQLite operations
-      worktrees.py           # git worktree create/cleanup
-      config.py              # YAML config loader
-      models.py              # dataclasses
+      review_parser.py       # APPROVED/NEEDS_REVISION parsing
+      hooks.py               # Bash safety hook (destructive command blocking)
+      poller.py              # GitHub Projects V2 polling (GraphQL)
+      pr_status.py           # PR review/CI/merge status checking
+      comments.py            # PR review comments extraction
+      state.py               # SQLite state store (aiosqlite)
+      worktrees.py           # git worktree create/delete/list
+      issue_logging.py       # per-issue JSONL logging
+      telegram/
+        __init__.py          # TelegramBot facade
+        models.py            # msgspec Structs (Update, Message, etc.)
+        callbacks.py         # callback data encoding/decoding
+        messages.py          # message builders (progress, escalation)
+        bot_api.py           # raw HTTP Bot API client
+        client.py            # rate-limited client wrapper
+        outbox.py            # priority queue with edit coalescing
+        poller.py            # long-polling update consumer
   agents/                    # agent definitions (markdown + frontmatter)
   workflows/                 # workflow definitions (YAML)
-  scripts/
-    pr-comments.sh
-  tests/
+  tests/                     # 184 tests
 ```
 
 ## Configuration
@@ -196,6 +207,7 @@ requires-python = ">=3.12"
 dependencies = [
     "claude-agent-sdk",
     "httpx",
+    "msgspec",
     "pyyaml",
     "typer",
     "aiosqlite",
@@ -206,9 +218,25 @@ dependencies = [
 adl = "auto_dev_loop.cli:app"
 ```
 
+## Getting Started
+
+```bash
+# Install dependencies
+uv sync
+
+# Validate config
+adl validate --config path/to/auto-dev.yaml
+
+# Start daemon
+adl run --config path/to/auto-dev.yaml
+
+# Run tests
+just test
+```
+
 ## Status
 
-**Pre-implementation.** Phase 0 research and SDK validation complete. See `docs/` for design documents.
+**Implemented.** All 8 phases complete with 184 tests passing. See `docs/plans/` for phase-by-phase implementation plans.
 
 ## License
 

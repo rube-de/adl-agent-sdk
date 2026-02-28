@@ -1,0 +1,36 @@
+id: bug_fix
+description: Bug fix — lean planning, focused build, fast turnaround
+
+stages:
+  - ref: plan
+    agent: architect
+
+  - ref: plan_review
+    agent: plan_reviewer
+    loopTarget: plan
+    maxIterations: 1
+
+  - ref: dev
+    type: team
+    agent: orchestrator
+    team:
+      tester:
+        agent: tester
+        model_role: smol
+      developer:
+        agent: developer
+        model_role: default
+
+  - ref: multi_review
+    agent: reviewer
+    reviewers: [claude, gemini, codex]
+    loopTarget: dev
+    maxIterations: 3
+
+  - ref: create_pr
+    type: infrastructure
+    agent: _infra
+
+  - ref: pr_review
+    type: infrastructure
+    agent: _infra

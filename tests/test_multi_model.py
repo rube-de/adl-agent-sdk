@@ -1,0 +1,123 @@
+"""Tests for parallel multi-model review."""
+
+import asyncio
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
+from auto_dev_loop.multi_model import (
+    multi_model_review,
+    build_review_prompt,
+    AllReviewersFailedError,
+)
+from auto_dev_loop.models import AgentDef, Config, TelegramConfig, Defaults
+
+
+def _config():
+    return Config(
+        telegram=TelegramConfig(bot_token="t", chat_id=1),
+        model_roles={"default": "claude-sonnet-4-5"},
+        repos=[],
+        defaults=Defaults(external_reviewers=["gemini"], external_review_timeout=300),
+    )
+
+
+def _agents():
+    return {
+        "reviewer": AgentDef(
+            name="reviewer", description="", system_prompt="review",
+            tools=["Read"], model_role="default", max_turns=30,
+        ),
+    }
+
+
+def test_build_review_prompt():
+    prompt = build_review_prompt("the plan", "diff --git a/b")
+    assert "the plan" in prompt
+    assert "diff --git" in prompt
+
+
+@pytest.mark.asyncio
+async def test_all_approved():
+    async def mock_query(agent_def, prompt, worktree, config, **kw):
+        return "Looks good.\n\nAPPROVED"
+
+    async def mock_external(cmd, prompt, worktree, timeout):
+        return "Fine.\n\nAPPROVED"
+
+    with patch("auto_dev_loop.multi_model.agent_query", side_effect=mock_query):
+        with patch("auto_dev_loop.multi_model.run_external_with_timeout", side_effect=mock_external):
+            result = await multi_model_review(
+                worktree=Path("/tmp/wt"),
+                plan="plan",
+                diff="diff",
+                agents=_agents(),
+                config=_config(),
+            )
+
+    assert result.verdict.approved is True
+
+
+@pytest.mark.asyncio
+async def test_one_rejection_means_rejected():
+    async def mock_query(agent_def, prompt, worktree, config, **kw):
+        return "APPROVED"
+
+    async def mock_external(cmd, prompt, worktree, timeout):
+        return "## Feedback\nMissing tests\n\nNEEDS_REVISION"
+
+    with patch("auto_dev_loop.multi_model.agent_query", side_effect=mock_query):
+        with patch("auto_dev_loop.multi_model.run_external_with_timeout", side_effect=mock_external):
+            result = await multi_model_review(
+                worktree=Path("/tmp/wt"),
+                plan="plan",
+                diff="diff",
+                agents=_agents(),
+                config=_config(),
+            )
+
+    assert result.verdict.approved is False
+    assert "Missing tests" in result.verdict.feedback
+
+
+@pytest.mark.asyncio
+async def test_external_timeout_graceful():
+    async def mock_query(agent_def, prompt, worktree, config, **kw):
+        return "APPROVED"
+
+    async def mock_external(cmd, prompt, worktree, timeout):
+        raise asyncio.TimeoutError()
+
+    with patch("auto_dev_loop.multi_model.agent_query", side_effect=mock_query):
+        with patch("auto_dev_loop.multi_model.run_external_with_timeout", side_effect=mock_external):
+            result = await multi_model_review(
+                worktree=Path("/tmp/wt"),
+                plan="plan",
+                diff="diff",
+                agents=_agents(),
+                config=_config(),
+            )
+
+    # Claude approved, external timed out — should still be approved
+    assert result.verdict.approved is True
+
+
+@pytest.mark.asyncio
+async def test_all_reviewers_fail():
+    async def mock_query(agent_def, prompt, worktree, config, **kw):
+        raise RuntimeError("SDK down")
+
+    async def mock_external(cmd, prompt, worktree, timeout):
+        raise asyncio.TimeoutError()
+
+    with patch("auto_dev_loop.multi_model.agent_query", side_effect=mock_query):
+        with patch("auto_dev_loop.multi_model.run_external_with_timeout", side_effect=mock_external):
+            with pytest.raises(AllReviewersFailedError):
+                await multi_model_review(
+                    worktree=Path("/tmp/wt"),
+                    plan="plan",
+                    diff="diff",
+                    agents=_agents(),
+                    config=_config(),
+                )
