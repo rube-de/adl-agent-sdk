@@ -52,7 +52,13 @@ def should_process_issue(
 
 
 def _get_repo_owner(repo_cfg: RepoConfig) -> str:
-    """Extract project owner from repo path (e.g., 'owner/repo' -> 'owner')."""
+    """Get GitHub owner from repo config.
+
+    Prefers the explicit ``owner`` field. Falls back to splitting ``path``
+    on '/' for backward compatibility with 'owner/repo'-style paths.
+    """
+    if repo_cfg.owner:
+        return repo_cfg.owner
     return repo_cfg.path.split("/")[0] if "/" in repo_cfg.path else repo_cfg.path
 
 

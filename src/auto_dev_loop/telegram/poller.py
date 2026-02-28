@@ -46,7 +46,7 @@ class TelegramPoller:
                 updates = await self._api.get_updates(
                     offset=self._offset, timeout=50,
                 )
-            except (httpx.HTTPError, Exception):
+            except (httpx.HTTPError, OSError):
                 log.warning("Telegram poll failed, retrying in 5s")
                 await asyncio.sleep(5)
                 continue

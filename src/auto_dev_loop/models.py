@@ -96,6 +96,7 @@ class RepoConfig:
         "in_progress": "In Progress",
         "done": "Done",
     })
+    owner: str | None = None
 
 
 @dataclass

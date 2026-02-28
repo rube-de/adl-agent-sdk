@@ -48,6 +48,10 @@ def load_config(path: Path) -> Config:
         raise ConfigError(f"Config file not found: {path}")
 
     raw = yaml.safe_load(path.read_text())
+    if not isinstance(raw, dict):
+        raise ConfigError(
+            f"Config file must contain a YAML mapping, got {type(raw).__name__}"
+        )
     raw = _expand_recursive(raw)
 
     # Parse telegram section
@@ -79,6 +83,7 @@ def load_config(path: Path) -> Config:
                     "in_progress": "In Progress",
                     "done": "Done",
                 }),
+                owner=r.get("owner"),
             ))
         except KeyError as e:
             raise ConfigError(f"Missing required key in repos[{i}]: {e}") from None

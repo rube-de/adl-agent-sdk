@@ -83,8 +83,13 @@ class Verdict:
     feedback: str | None = None
 
 
-def _parse_verdict(output: str) -> Verdict:
-    """Parse agent output into a verdict."""
+def _parse_verdict(output: str, *, strict: bool = False) -> Verdict:
+    """Parse agent output into a verdict.
+
+    When *strict* is True (review stages), missing markers default to
+    ``needs_revision`` rather than ``approved`` to prevent silently passing
+    malformed reviewer output.
+    """
     lines = [line.strip() for line in output.strip().splitlines() if line.strip()]
 
     for line in reversed(lines[-5:]):
@@ -98,7 +103,8 @@ def _parse_verdict(output: str) -> Verdict:
         if line == "VETOED":
             return Verdict(status="vetoed", feedback=output)
 
-    # No clear marker — treat as completed (non-review stages)
+    if strict:
+        return Verdict(status="needs_revision", feedback="No verdict marker found in output")
     return Verdict(status="approved")
 
 
@@ -186,7 +192,8 @@ async def execute_workflow(
         # _build_prompt filters it out of agent prompts)
         stage_outputs[f"_{stage.ref}_last_output"] = output
 
-        verdict = _parse_verdict(output)
+        is_review = bool(stage.reviewers) or stage.canVeto
+        verdict = _parse_verdict(output, strict=is_review)
 
         if verdict.status in ("approved", "completed"):
             stage_outputs[stage.ref] = output
