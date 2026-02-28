@@ -28,7 +28,7 @@ def main(
 @app.command()
 def run(
     config: Path = typer.Option(
-        Path.home() / ".claude" / "auto-dev.yaml",
+        Path.home() / ".adl" / "config.yaml",
         "--config", "-c",
         help="Path to config YAML file.",
     ),
@@ -39,13 +39,13 @@ def run(
 ) -> None:
     """Start the Auto Dev Loop daemon."""
     from .main import run_daemon
-    run_daemon(str(config))
+    run_daemon(str(config), once=once)
 
 
 @app.command()
 def validate(
     config: Path = typer.Option(
-        Path.home() / ".claude" / "auto-dev.yaml",
+        Path.home() / ".adl" / "config.yaml",
         "--config", "-c",
         help="Path to config YAML file.",
     ),

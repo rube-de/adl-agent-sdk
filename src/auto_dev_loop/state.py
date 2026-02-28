@@ -164,3 +164,12 @@ class StateStore:
         )
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]
+
+    async def list_terminal_issue_keys(self) -> set[str]:
+        """Return ``repo#number`` keys for issues in terminal states."""
+        cursor = await self._db.execute(
+            "SELECT repo, number FROM issues WHERE state IN (?, ?, ?)",
+            ("completed", "failed", "escalated"),
+        )
+        rows = await cursor.fetchall()
+        return {f"{r['repo']}#{r['number']}" for r in rows}

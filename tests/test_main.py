@@ -1,5 +1,6 @@
 """Tests for the main daemon loop."""
 
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, patch, MagicMock
 
@@ -7,9 +8,12 @@ import pytest
 
 from auto_dev_loop.main import (
     DaemonState,
+    daemon_loop,
+    drain_tasks,
     run_poll_cycle,
     should_process_issue,
     issue_key,
+    _on_issue_done,
 )
 from auto_dev_loop.models import Issue, Config, TelegramConfig, Defaults, RepoConfig
 
@@ -50,21 +54,57 @@ def test_should_process_issue_max_concurrent():
     assert should_process_issue(issue, state, max_concurrent=1) is False
 
 
+def test_should_process_issue_skips_completed():
+    state = DaemonState()
+    state.completed_keys.add("owner/repo#42")
+    issue = Issue(id=0, number=42, repo="owner/repo", title="t", body="b")
+    assert should_process_issue(issue, state) is False
+
+
 @pytest.mark.asyncio
-async def test_run_poll_cycle_finds_issues():
+async def test_run_poll_cycle_spawns_task():
+    """Normal mode spawns a background task (not inline await)."""
     issues = [Issue(id=0, number=42, repo="owner/repo", title="t", body="b")]
     state = DaemonState()
 
-    mock_process = AsyncMock()
-    mock_process.return_value = MagicMock(state="completed")
+    mock_process = AsyncMock(return_value=MagicMock(state="completed"))
 
     with patch("auto_dev_loop.main.poll_project_issues", return_value=issues):
         with patch("auto_dev_loop.main.process_issue", mock_process):
             await run_poll_cycle(_config(), state)
+            # Task was spawned — drain to let it complete
+            assert "owner/repo#42" in state.active_issues
+            assert "owner/repo#42" in state.tasks
+            await drain_tasks(state)
 
-    # Issue should be removed from active after processing
+    # Callback cleans up after task completes
     assert "owner/repo#42" not in state.active_issues
+    assert "owner/repo#42" not in state.tasks
     mock_process.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_run_poll_cycle_concurrent_tasks():
+    """Multiple issues spawn concurrent tasks up to max_concurrent."""
+    issues = [
+        Issue(id=1, number=10, repo="owner/repo", title="a", body="b"),
+        Issue(id=2, number=20, repo="owner/repo", title="c", body="d"),
+        Issue(id=3, number=30, repo="owner/repo", title="e", body="f"),
+    ]
+    state = DaemonState()
+    cfg = _config()
+    cfg.defaults.max_concurrent = 2
+
+    mock_process = AsyncMock(return_value=MagicMock(state="completed"))
+
+    with patch("auto_dev_loop.main.poll_project_issues", return_value=issues):
+        with patch("auto_dev_loop.main.process_issue", mock_process):
+            await run_poll_cycle(cfg, state)
+            # Only 2 tasks should be spawned (max_concurrent=2)
+            assert len(state.tasks) == 2
+            await drain_tasks(state)
+
+    assert mock_process.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -75,3 +115,65 @@ async def test_run_poll_cycle_no_issues():
         await run_poll_cycle(_config(), state)
 
     assert len(state.active_issues) == 0
+    assert len(state.tasks) == 0
+
+
+@pytest.mark.asyncio
+async def test_run_poll_cycle_once_processes_single_issue():
+    """--once mode processes at most one issue inline then returns."""
+    issues = [
+        Issue(id=1, number=10, repo="owner/repo", title="a", body="b"),
+        Issue(id=2, number=20, repo="owner/repo", title="c", body="d"),
+    ]
+    state = DaemonState()
+    cfg = _config()
+    cfg.defaults.max_concurrent = 5  # would normally allow more
+
+    mock_process = AsyncMock(return_value=MagicMock(state="completed"))
+
+    with patch("auto_dev_loop.main.poll_project_issues", return_value=issues):
+        with patch("auto_dev_loop.main.process_issue", mock_process):
+            await run_poll_cycle(cfg, state, once=True)
+
+    # Only one issue processed, no tasks spawned (inline in --once)
+    mock_process.assert_awaited_once()
+    assert len(state.tasks) == 0
+
+
+def test_on_issue_done_callback():
+    """Callback removes issue from active set and task dict."""
+    state = DaemonState()
+    state.active_issues.add("owner/repo#42")
+    mock_task = MagicMock()
+    state.tasks["owner/repo#42"] = mock_task
+
+    _on_issue_done("owner/repo#42", state, mock_task)
+
+    assert "owner/repo#42" not in state.active_issues
+    assert "owner/repo#42" not in state.tasks
+
+
+@pytest.mark.asyncio
+async def test_task_exception_does_not_crash_drain():
+    """A failing task should not prevent drain_tasks from completing."""
+    state = DaemonState()
+
+    async def _explode():
+        raise RuntimeError("boom")
+
+    task = asyncio.get_running_loop().create_task(_explode())
+    state.tasks["bad"] = task
+
+    # drain_tasks uses return_exceptions=True, so this should not raise
+    await drain_tasks(state)
+
+
+@pytest.mark.asyncio
+async def test_daemon_loop_once_exits():
+    """daemon_loop with once=True runs one cycle and returns."""
+    mock_cycle = AsyncMock()
+
+    with patch("auto_dev_loop.main.run_poll_cycle", mock_cycle):
+        await daemon_loop(_config(), once=True)
+
+    mock_cycle.assert_awaited_once()

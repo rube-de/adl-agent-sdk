@@ -18,6 +18,8 @@ from .workflow_router import select_workflow
 from .worktrees import create_worktree, delete_worktree
 
 if TYPE_CHECKING:
+    from .issue_logging import IssueLogger
+    from .state import StateStore
     from .telegram import TelegramBot
 
 log = logging.getLogger(__name__)
@@ -112,11 +114,29 @@ async def _flush_security_events(
         )
 
 
+async def _transition(
+    state: IssueState,
+    store: StateStore | None,
+    issue_logger: IssueLogger | None,
+    issue: Issue,
+) -> None:
+    """Persist a state transition to both the DB and per-issue log."""
+    if store:
+        row = await store.get_issue(issue.repo, issue.number)
+        if row:
+            await store.update_state(row["id"], state.value)
+    if issue_logger:
+        issue_logger.write_state({"state": state.value, "issue": issue.number})
+        issue_logger.log_event("state_transition", {"state": state.value})
+
+
 async def process_issue(
     issue: Issue,
     config: Config,
     repo_path: Path | None = None,
     telegram: TelegramBot | None = None,
+    store: StateStore | None = None,
+    issue_logger: IssueLogger | None = None,
 ) -> ProcessResult:
     """Drive a single issue through the full lifecycle."""
     _repo_path = repo_path or Path(".")
@@ -131,34 +151,47 @@ async def process_issue(
 
         workflow_id = select_workflow(issue, config.workflow_selection)
         log.info(f"Selected workflow: {workflow_id}")
+        if issue_logger:
+            issue_logger.log_event("workflow_selected", {"workflow": workflow_id})
 
+        # --- Planning ---
+        await _transition(IssueState.PLANNING, store, issue_logger, issue)
         plan_result = await plan_loop(issue, worktree_path, config, guard=guard)
         await _flush_security_events(guard, issue, telegram)
         log.info(f"Plan approved after {plan_result.iterations} iterations")
 
+        # --- Development ---
+        await _transition(IssueState.DEVELOPING, store, issue_logger, issue)
         dev_result = await dev_loop(
             issue, plan_result.plan, worktree_path, config, guard=guard,
         )
         await _flush_security_events(guard, issue, telegram)
         log.info(f"Dev completed after {dev_result.cycles} cycles")
 
+        # --- PR creation ---
         pr_number = await create_pr(issue, worktree_path)
+        await _transition(IssueState.PR_CREATED, store, issue_logger, issue)
         log.info(f"PR #{pr_number} created")
 
+        # --- Review ---
+        await _transition(IssueState.IN_REVIEW, store, issue_logger, issue)
         review_result = await review_loop(
             issue, pr_number, worktree_path, config, guard=guard,
         )
         await _flush_security_events(guard, issue, telegram)
         log.info(f"Review completed after {review_result.cycles} cycles")
 
+        await _transition(IssueState.COMPLETED, store, issue_logger, issue)
         return ProcessResult(state=IssueState.COMPLETED, pr_number=pr_number)
 
     except (MaxPlanIterationsError, MaxDevCyclesError, MaxReviewCyclesError) as e:
         log.error(f"Loop exhausted for {issue.repo}#{issue.number}: {e}")
+        await _transition(IssueState.FAILED, store, issue_logger, issue)
         return ProcessResult(state=IssueState.FAILED, error=str(e))
 
     except Exception as e:
         log.exception(f"Unexpected error processing {issue.repo}#{issue.number}")
+        await _transition(IssueState.FAILED, store, issue_logger, issue)
         return ProcessResult(state=IssueState.FAILED, error=str(e))
 
     finally:

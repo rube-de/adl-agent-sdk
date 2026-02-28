@@ -89,3 +89,22 @@ async def test_upsert_is_idempotent(db: StateStore):
     issue = await db.get_issue("o/r", 1)
     assert issue["title"] == "t2"
     assert issue["state"] == "PLANNING"
+
+
+@pytest.mark.asyncio
+async def test_list_terminal_issue_keys(db: StateStore):
+    await db.upsert_issue(repo="o/r", number=1, title="a", state="completed")
+    await db.upsert_issue(repo="o/r", number=2, title="b", state="failed")
+    await db.upsert_issue(repo="o/r", number=3, title="c", state="planning")
+    await db.upsert_issue(repo="o/r", number=4, title="d", state="escalated")
+
+    keys = await db.list_terminal_issue_keys()
+
+    assert keys == {"o/r#1", "o/r#2", "o/r#4"}
+    assert "o/r#3" not in keys
+
+
+@pytest.mark.asyncio
+async def test_list_terminal_issue_keys_empty(db: StateStore):
+    keys = await db.list_terminal_issue_keys()
+    assert keys == set()
