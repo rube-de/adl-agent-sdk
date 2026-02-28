@@ -64,7 +64,9 @@ async def create_pr(issue: Issue, worktree: Path) -> int:
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    await proc.communicate()
+    _, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        raise RuntimeError(f"git push failed: {stderr.decode().strip()}")
 
     cmd = build_pr_command(
         repo=issue.repo,

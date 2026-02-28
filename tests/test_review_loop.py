@@ -6,8 +6,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from auto_dev_loop.review_loop import (
+    push_fixes,
     review_loop,
     MaxReviewCyclesError,
+    PushFixesError,
     ReviewLoopResult,
 )
 from auto_dev_loop.models import Issue, AgentDef, Config, TelegramConfig, Defaults
@@ -104,3 +106,47 @@ async def test_review_loop_max_cycles():
                         with patch("auto_dev_loop.review_loop.asyncio.sleep", new_callable=AsyncMock):
                             with pytest.raises(MaxReviewCyclesError):
                                 await review_loop(_issue(), 1, Path("/tmp/wt"), _config(max_cycles=2))
+
+
+# ── push_fixes return-code tests ────────────────────────────────────
+
+
+def _mock_proc(returncode: int, stderr: str = ""):
+    """Create a mock subprocess with a preset returncode."""
+    proc = AsyncMock()
+    proc.communicate.return_value = (b"", stderr.encode())
+    proc.returncode = returncode
+    return proc
+
+
+@pytest.mark.asyncio
+async def test_push_fixes_success():
+    procs = [_mock_proc(0), _mock_proc(0), _mock_proc(0)]
+    with patch("auto_dev_loop.review_loop.asyncio.create_subprocess_exec", side_effect=procs):
+        result = await push_fixes(Path("/tmp/wt"), _issue())
+    assert result is True
+
+
+@pytest.mark.asyncio
+async def test_push_fixes_nothing_to_commit():
+    """git commit returns 1 when nothing to commit — should return False, not raise."""
+    procs = [_mock_proc(0), _mock_proc(1, "nothing to commit")]
+    with patch("auto_dev_loop.review_loop.asyncio.create_subprocess_exec", side_effect=procs):
+        result = await push_fixes(Path("/tmp/wt"), _issue())
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_push_fixes_git_add_fails():
+    procs = [_mock_proc(128, "fatal: not a git repository")]
+    with patch("auto_dev_loop.review_loop.asyncio.create_subprocess_exec", side_effect=procs):
+        with pytest.raises(PushFixesError, match="git add failed"):
+            await push_fixes(Path("/tmp/wt"), _issue())
+
+
+@pytest.mark.asyncio
+async def test_push_fixes_git_push_fails():
+    procs = [_mock_proc(0), _mock_proc(0), _mock_proc(1, "rejected")]
+    with patch("auto_dev_loop.review_loop.asyncio.create_subprocess_exec", side_effect=procs):
+        with pytest.raises(PushFixesError, match="git push failed"):
+            await push_fixes(Path("/tmp/wt"), _issue())

@@ -13,6 +13,7 @@ SAMPLE_GH_OUTPUT = {
                 "id": "item_1",
                 "content": {
                     "__typename": "Issue",
+                    "databaseId": 100042,
                     "number": 42,
                     "title": "Fix auth bug",
                     "body": "The login page crashes",
@@ -25,6 +26,7 @@ SAMPLE_GH_OUTPUT = {
                 "id": "item_2",
                 "content": {
                     "__typename": "Issue",
+                    "databaseId": 100043,
                     "number": 43,
                     "title": "Add docs",
                     "body": "Need API docs",
@@ -41,10 +43,21 @@ SAMPLE_GH_OUTPUT = {
 def test_parse_project_items_filters_by_column():
     issues = parse_project_items(SAMPLE_GH_OUTPUT, "Ready for Dev")
     assert len(issues) == 1
+    assert issues[0].id == 100042
     assert issues[0].number == 42
     assert issues[0].title == "Fix auth bug"
     assert issues[0].labels == ["bug"]
     assert issues[0].project_item_id == "item_1"
+
+
+def test_parse_project_items_unique_ids():
+    """Each issue gets its globally unique databaseId, not a hardcoded 0."""
+    issues = parse_project_items(SAMPLE_GH_OUTPUT, "Ready for Dev")
+    in_progress = parse_project_items(SAMPLE_GH_OUTPUT, "In Progress")
+    all_issues = issues + in_progress
+    ids = [i.id for i in all_issues]
+    assert ids == [100042, 100043]
+    assert len(set(ids)) == len(ids), "IDs must be unique"
 
 
 def test_parse_project_items_empty():

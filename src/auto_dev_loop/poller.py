@@ -25,6 +25,7 @@ query($owner: String!, $number: Int!) {
           content {
             __typename
             ... on Issue {
+              databaseId
               number
               title
               body
@@ -64,7 +65,7 @@ def parse_project_items(data: dict, target_column: str) -> list[Issue]:
         ]
 
         issues.append(Issue(
-            id=0,
+            id=content["databaseId"],
             number=content["number"],
             repo=content["repository"]["nameWithOwner"],
             title=content["title"],

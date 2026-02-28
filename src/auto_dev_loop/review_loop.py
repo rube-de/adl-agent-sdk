@@ -21,31 +21,51 @@ class MaxReviewCyclesError(Exception):
     pass
 
 
+class PushFixesError(Exception):
+    pass
+
+
 @dataclass
 class ReviewLoopResult:
     cycles: int
     merged: bool
 
 
-async def push_fixes(worktree: Path, issue: Issue) -> None:
-    """Stage, commit, and push fixes."""
+async def push_fixes(worktree: Path, issue: Issue) -> bool:
+    """Stage, commit, and push fixes. Returns True if changes were pushed."""
     proc = await asyncio.create_subprocess_exec(
         "git", "add", "-A",
         cwd=str(worktree),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
     )
-    await proc.communicate()
+    _, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        raise PushFixesError(f"git add failed: {stderr.decode().strip()}")
 
     proc = await asyncio.create_subprocess_exec(
         "git", "commit", "-m", f"fix: address review comments for #{issue.number}",
         cwd=str(worktree),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
     )
-    await proc.communicate()
+    _, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        # Nothing to commit is not an error — agent may have found no changes needed
+        log.info("Nothing to commit, skipping push")
+        return False
 
     proc = await asyncio.create_subprocess_exec(
         "git", "push",
         cwd=str(worktree),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
     )
-    await proc.communicate()
+    _, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        raise PushFixesError(f"git push failed: {stderr.decode().strip()}")
+
+    return True
 
 
 async def review_loop(

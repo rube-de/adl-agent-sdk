@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch, MagicMock
 import pytest
 
 from auto_dev_loop.orchestrator import (
+    create_pr,
     process_issue,
     IssueState,
     ProcessResult,
@@ -80,3 +81,34 @@ def test_build_pr_command():
     assert "create" in cmd
     assert "--repo" in cmd
     assert "owner/repo" in cmd
+
+
+# ── create_pr return-code tests ─────────────────────────────────────
+
+
+def _mock_proc(returncode: int, stdout: str = "", stderr: str = ""):
+    proc = AsyncMock()
+    proc.communicate.return_value = (stdout.encode(), stderr.encode())
+    proc.returncode = returncode
+    return proc
+
+
+@pytest.mark.asyncio
+async def test_create_pr_push_fails():
+    """git push failure should raise before gh pr create runs."""
+    push_proc = _mock_proc(1, stderr="rejected: non-fast-forward")
+
+    with patch("auto_dev_loop.orchestrator.asyncio.create_subprocess_exec", return_value=push_proc):
+        with pytest.raises(RuntimeError, match="git push failed"):
+            await create_pr(_issue(), Path("/tmp/wt"))
+
+
+@pytest.mark.asyncio
+async def test_create_pr_success():
+    push_proc = _mock_proc(0)
+    pr_proc = _mock_proc(0, stdout="https://github.com/owner/repo/pull/99")
+
+    procs = [push_proc, pr_proc]
+    with patch("auto_dev_loop.orchestrator.asyncio.create_subprocess_exec", side_effect=procs):
+        pr_number = await create_pr(_issue(), Path("/tmp/wt"))
+    assert pr_number == 99
