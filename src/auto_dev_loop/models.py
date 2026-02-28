@@ -52,6 +52,7 @@ class PlanResult:
 class DevResult:
     diff: str
     cycles: int
+    review_history: list[dict] = field(default_factory=list)
 
 
 @dataclass
