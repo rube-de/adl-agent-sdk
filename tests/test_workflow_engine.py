@@ -7,7 +7,6 @@ from auto_dev_loop.workflow_engine import (
     evaluate_condition,
     StageDispatcher,
     _parse_verdict,
-    Verdict,
 )
 from auto_dev_loop.models import Issue, ReviewVerdict, WorkflowResult
 from auto_dev_loop.workflow_loader import WorkflowConfig, StageConfig
@@ -297,7 +296,7 @@ async def test_internal_keys_prefixed_with_underscore():
 def test_parse_verdict_approved_beyond_5_lines():
     """Verdict keyword beyond last 5 lines should still be found."""
     verbose_lines = "\n".join(f"Detail line {i}" for i in range(10))
-    output = f"{verbose_lines}\nAPPROVED"
+    output = f"APPROVED\n{verbose_lines}"
     verdict = _parse_verdict(output)
     assert verdict.status == "approved"
 
