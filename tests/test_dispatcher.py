@@ -59,12 +59,64 @@ def test_build_branch_name():
 
 
 def test_build_branch_name_truncates():
-    issue = _issue(number=1, title="A very long title that exceeds thirty characters easily")
+    issue = _issue(number=1, title="A very long title that exceeds the maximum slug length easily and keeps going on and on")
     name = build_branch_name(issue)
     assert name.startswith("adl/1-")
-    # The slug part should be truncated to ~30 chars
+    # The slug part should be truncated to max slug length (60)
     slug = name[len("adl/1-"):]
-    assert len(slug) <= 35
+    assert len(slug) <= 60
+
+
+def test_build_branch_name_strips_path_traversal():
+    issue = _issue(number=7, title="x/../../../etc/shadow")
+    name = build_branch_name(issue)
+    assert ".." not in name
+    assert "/" not in name.removeprefix("adl/")
+
+
+def test_build_branch_name_strips_slashes():
+    issue = _issue(number=3, title="feat/sub/thing")
+    name = build_branch_name(issue)
+    # Only the adl/ prefix should contain a slash
+    assert name.count("/") == 1
+
+
+def test_build_branch_name_special_chars_only():
+    issue = _issue(number=5, title="!@#$%^&*()")
+    name = build_branch_name(issue)
+    assert name.startswith("adl/5-")
+    # Must not be empty after prefix
+    slug = name.removeprefix("adl/5-")
+    assert len(slug) > 0 or name == "adl/5-issue"
+
+
+def test_build_branch_name_unicode():
+    issue = _issue(number=8, title="修复登录bug")
+    name = build_branch_name(issue)
+    # Only ASCII alphanumerics, dots, dashes allowed
+    slug = name.removeprefix("adl/8-")
+    assert all(c in "abcdefghijklmnopqrstuvwxyz0123456789._-" for c in slug)
+
+
+def test_build_branch_name_max_length():
+    issue = _issue(number=99, title="a" * 200)
+    name = build_branch_name(issue)
+    # Git branch names over ~250 chars cause problems; we cap the slug at 60
+    assert len(name) <= 70
+
+
+def test_build_branch_name_empty_title():
+    issue = _issue(number=10, title="")
+    name = build_branch_name(issue)
+    assert name == "adl/10-issue"
+
+
+def test_build_branch_name_leading_trailing_dashes():
+    issue = _issue(number=6, title="---hello world---")
+    name = build_branch_name(issue)
+    slug = name.removeprefix("adl/6-")
+    assert not slug.startswith("-")
+    assert not slug.endswith("-")
 
 
 # --- dispatch_single ---
