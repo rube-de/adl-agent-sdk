@@ -18,8 +18,8 @@ def parse_review_verdict(output: str) -> ReviewVerdict:
 
     lines = [line.strip() for line in output.strip().splitlines() if line.strip()]
 
-    # Check last 5 non-empty lines for markers
-    for line in reversed(lines[-5:]):
+    # Check all non-empty lines bottom-up for markers
+    for line in reversed(lines):
         if line == "APPROVED":
             return ReviewVerdict(approved=True, feedback=None)
         if line == "NEEDS_REVISION":
