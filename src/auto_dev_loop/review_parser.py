@@ -1,6 +1,7 @@
 """Structured review verdict parsing.
 
-Reviewers must end their response with APPROVED or NEEDS_REVISION on its own line.
+Reviewers include APPROVED or NEEDS_REVISION on its own line anywhere in their
+response.  The parser scans bottom-up, so the *last* marker wins.
 Conservative: no marker = treated as needs revision.
 """
 
@@ -18,18 +19,19 @@ def parse_review_verdict(output: str) -> ReviewVerdict:
 
     lines = [line.strip() for line in output.strip().splitlines() if line.strip()]
 
-    # Check last 5 non-empty lines for markers
-    for line in reversed(lines[-5:]):
+    # Check all non-empty lines bottom-up for markers
+    for line in reversed(lines):
         if line == "APPROVED":
             return ReviewVerdict(approved=True, feedback=None)
         if line == "NEEDS_REVISION":
-            # Extract feedback section if present
-            match = re.search(
+            # Extract feedback section if present (last match, to pair
+            # with the bottom-up verdict scan)
+            matches = list(re.finditer(
                 r"## Feedback\s*\n(.*?)(?=\nNEEDS_REVISION)",
                 output,
                 re.DOTALL,
-            )
-            feedback = match.group(1).strip() if match else output
+            ))
+            feedback = matches[-1].group(1).strip() if matches else output
             return ReviewVerdict(approved=False, feedback=feedback)
 
     # No marker found — conservative: treat as needs revision
