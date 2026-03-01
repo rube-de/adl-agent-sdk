@@ -68,6 +68,21 @@ NEEDS_REVISION"""
         assert v.approved is False
         assert v.feedback == output
 
+    def test_approved_beyond_5_lines(self):
+        """APPROVED keyword beyond last 5 lines should still be found."""
+        verbose_lines = "\n".join(f"Detail line {i}" for i in range(10))
+        output = f"Review complete.\n\nAPPROVED\n{verbose_lines}"
+        v = parse_review_verdict(output)
+        assert v.approved is True
+
+    def test_needs_revision_beyond_5_lines(self):
+        """NEEDS_REVISION keyword beyond last 5 lines should still be found."""
+        verbose_lines = "\n".join(f"Detail line {i}" for i in range(10))
+        output = f"## Feedback\nFix the tests\n\nNEEDS_REVISION\n{verbose_lines}"
+        v = parse_review_verdict(output)
+        assert v.approved is False
+        assert "Fix the tests" in v.feedback
+
 
 class TestSynthesizeReviews:
 
