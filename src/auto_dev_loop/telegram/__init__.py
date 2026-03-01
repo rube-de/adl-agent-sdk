@@ -124,6 +124,9 @@ class TelegramBot:
         decision: asyncio.Future[HumanDecision] = asyncio.get_running_loop().create_future()
 
         async def handle_callback(cb: CallbackQuery) -> None:
+            if cb.message is None or cb.message.chat.id != self._chat_id:
+                await self._api.answer_callback_query(cb.id, text="Unauthorized")
+                return
             parsed = decode_callback(cb.data)
             if not parsed:
                 return
