@@ -92,7 +92,7 @@ def _parse_verdict(output: str, *, strict: bool = False) -> Verdict:
     """
     lines = [line.strip() for line in output.strip().splitlines() if line.strip()]
 
-    for line in reversed(lines[-5:]):
+    for line in reversed(lines):
         if line in ("APPROVED", "PLAN_READY", "TESTS_PASSING",
                      "IMPLEMENTATION_COMPLETE", "FIXES_APPLIED",
                      "FEEDBACK_APPLIED"):
