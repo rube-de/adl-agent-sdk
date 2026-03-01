@@ -49,3 +49,4 @@ logs/
 *.bak
 *.tmp
 .claude/files/
+docs/plans/
