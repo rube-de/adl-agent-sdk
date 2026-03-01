@@ -16,11 +16,10 @@ async def create_worktree(repo_path: Path, worktree_path: Path, branch: str) -> 
     if worktree_path.exists():
         raise WorktreeError(f"Worktree path already exists: {worktree_path}")
 
-    # Defense-in-depth: ensure resolved path stays inside its parent directory
+    # Defense-in-depth: reject paths with traversal components
     if ".." in worktree_path.parts:
-        resolved = worktree_path.resolve()
         raise WorktreeError(
-            f"Worktree path resolves outside parent directory: {resolved}"
+            f"Worktree path contains '..' traversal component: {worktree_path}"
         )
 
     worktree_path.parent.mkdir(parents=True, exist_ok=True)
