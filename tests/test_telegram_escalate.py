@@ -7,7 +7,7 @@ import asyncio
 import pytest
 
 from auto_dev_loop.models import Issue, TelegramConfig
-from auto_dev_loop.telegram import TelegramBot, HumanDecision
+from auto_dev_loop.telegram import TelegramBot
 from auto_dev_loop.telegram.models import (
     CallbackQuery, Chat, Message, User,
 )
@@ -160,4 +160,4 @@ async def test_callback_from_authorized_chat_is_accepted():
     result = await task
     assert result.action == "approve"
     # Should have answered with the action, not "Unauthorized"
-    assert api.answered.get("ok") != "Unauthorized"
+    assert api.answered.get("ok") == "Action: approve"
