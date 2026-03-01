@@ -62,3 +62,14 @@ async def test_list_worktrees(git_repo: Path, tmp_path: Path):
     paths = [str(wt["path"]) for wt in wts]
     assert str(wt1) in paths
     assert str(wt2) in paths
+
+
+@pytest.mark.asyncio
+async def test_create_worktree_rejects_path_traversal(git_repo: Path, tmp_path: Path):
+    """Defense-in-depth: even if branch sanitization fails, worktree creation
+    must reject paths that resolve outside the parent directory."""
+    safe_parent = tmp_path / "worktrees"
+    safe_parent.mkdir()
+    evil_path = safe_parent / ".." / "escaped"
+    with pytest.raises(WorktreeError, match="outside"):
+        await create_worktree(git_repo, evil_path, branch="adl/1-evil")
