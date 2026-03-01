@@ -24,6 +24,8 @@ def _sanitize_slug(raw: str) -> str:
     slug = re.sub(r"-{2,}", "-", slug)
     slug = slug.strip("-.")
     slug = slug[:_MAX_SLUG_LENGTH].rstrip("-.")
+    while slug.endswith(".lock"):
+        slug = slug.removesuffix(".lock").rstrip("-.")
     return slug or "issue"
 
 

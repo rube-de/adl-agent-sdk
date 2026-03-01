@@ -84,18 +84,15 @@ def test_build_branch_name_strips_slashes():
 def test_build_branch_name_special_chars_only():
     issue = _issue(number=5, title="!@#$%^&*()")
     name = build_branch_name(issue)
-    assert name.startswith("adl/5-")
-    # Must not be empty after prefix
-    slug = name.removeprefix("adl/5-")
-    assert len(slug) > 0 or name == "adl/5-issue"
+    # The slug should fall back to "issue"
+    assert name == "adl/5-issue"
 
 
 def test_build_branch_name_unicode():
     issue = _issue(number=8, title="修复登录bug")
     name = build_branch_name(issue)
-    # Only ASCII alphanumerics, dots, dashes allowed
-    slug = name.removeprefix("adl/8-")
-    assert all(c in "abcdefghijklmnopqrstuvwxyz0123456789._-" for c in slug)
+    # CJK chars are stripped, but ASCII "bug" survives sanitization
+    assert name == "adl/8-bug"
 
 
 def test_build_branch_name_max_length():
