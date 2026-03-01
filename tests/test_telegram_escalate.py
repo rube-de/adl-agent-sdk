@@ -84,22 +84,34 @@ class RecordingApi:
 async def _get_escalate_handler(bot: TelegramBot, issue: Issue, stage: StageConfig):
     """Start escalate() in background and return the registered callback handler."""
     task = asyncio.create_task(bot.escalate(issue, stage, FakeVerdict(), "security_veto"))
-    # Give escalate() time to register the handler
-    await asyncio.sleep(0.05)
 
     handler_id = f"esc:{issue.id}:{stage.ref}"
+    # Poll for handler registration instead of fixed sleep (avoids flaky CI)
+    for _ in range(100):  # up to 1s
+        if handler_id in bot._poller._callback_handlers:
+            break
+        await asyncio.sleep(0.01)
+    else:
+        pytest.fail(f"Handler '{handler_id}' was not registered in time")
+
     _prefix, handler = bot._poller._callback_handlers[handler_id]
     return task, handler
 
 
-@pytest.mark.asyncio
-async def test_callback_from_wrong_chat_is_rejected():
-    """Callback from unauthorized chat_id gets 'Unauthorized' and is ignored."""
+@pytest.fixture
+def bot_setup() -> tuple[TelegramBot, RecordingApi]:
+    """Set up a TelegramBot with fake API and outbox."""
     api = RecordingApi()
     bot = TelegramBot(_config())
     bot._api = api
-    bot._poller._api = api
     bot._outbox = FakeOutbox()
+    return bot, api
+
+
+@pytest.mark.asyncio
+async def test_callback_from_wrong_chat_is_rejected(bot_setup: tuple[TelegramBot, RecordingApi]):
+    """Callback from unauthorized chat_id gets 'Unauthorized' and is ignored."""
+    bot, api = bot_setup
 
     task, handler = await _get_escalate_handler(bot, _issue(), _stage())
 
@@ -120,13 +132,9 @@ async def test_callback_from_wrong_chat_is_rejected():
 
 
 @pytest.mark.asyncio
-async def test_callback_with_no_message_is_rejected():
+async def test_callback_with_no_message_is_rejected(bot_setup: tuple[TelegramBot, RecordingApi]):
     """Callback with message=None (e.g. very old message) is rejected."""
-    api = RecordingApi()
-    bot = TelegramBot(_config())
-    bot._api = api
-    bot._poller._api = api
-    bot._outbox = FakeOutbox()
+    bot, api = bot_setup
 
     task, handler = await _get_escalate_handler(bot, _issue(), _stage())
 
@@ -144,13 +152,9 @@ async def test_callback_with_no_message_is_rejected():
 
 
 @pytest.mark.asyncio
-async def test_callback_from_authorized_chat_is_accepted():
+async def test_callback_from_authorized_chat_is_accepted(bot_setup: tuple[TelegramBot, RecordingApi]):
     """Callback from the configured chat_id resolves the escalation."""
-    api = RecordingApi()
-    bot = TelegramBot(_config())
-    bot._api = api
-    bot._poller._api = api
-    bot._outbox = FakeOutbox()
+    bot, api = bot_setup
 
     task, handler = await _get_escalate_handler(bot, _issue(), _stage())
 

@@ -134,7 +134,7 @@ class TelegramBot:
             if cb_issue_id != issue.id or cb_stage_ref != stage.ref:
                 return
 
-            await self._poller._api.answer_callback_query(cb.id, text=f"Action: {action}")
+            await self._api.answer_callback_query(cb.id, text=f"Action: {action}")
 
             if action == "feedback":
                 self._poller.on_reply_to(msg.message_id, handle_reply)
