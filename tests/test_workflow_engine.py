@@ -6,6 +6,8 @@ from auto_dev_loop.workflow_engine import (
     execute_workflow,
     evaluate_condition,
     StageDispatcher,
+    _parse_verdict,
+    Verdict,
 )
 from auto_dev_loop.models import Issue, ReviewVerdict, WorkflowResult
 from auto_dev_loop.workflow_loader import WorkflowConfig, StageConfig
@@ -288,3 +290,34 @@ async def test_internal_keys_prefixed_with_underscore():
     internal_keys = [k for k in review_keys if "last_output" in k]
     assert all(k.startswith("_") for k in internal_keys), \
         f"Internal keys should be _-prefixed: {internal_keys}"
+
+
+# --- _parse_verdict tests ---
+
+def test_parse_verdict_approved_beyond_5_lines():
+    """Verdict keyword beyond last 5 lines should still be found."""
+    verbose_lines = "\n".join(f"Detail line {i}" for i in range(10))
+    output = f"{verbose_lines}\nAPPROVED"
+    verdict = _parse_verdict(output)
+    assert verdict.status == "approved"
+
+
+def test_parse_verdict_needs_revision_beyond_5_lines():
+    """NEEDS_REVISION beyond last 5 lines should still be found."""
+    verbose_lines = "\n".join(f"Detail line {i}" for i in range(10))
+    output = f"## Feedback\nFix the bug\n\nNEEDS_REVISION\n{verbose_lines}"
+    verdict = _parse_verdict(output)
+    assert verdict.status == "needs_revision"
+
+
+def test_parse_verdict_strict_no_marker():
+    """Strict mode with no marker should default to needs_revision."""
+    verdict = _parse_verdict("Some output with no verdict keyword", strict=True)
+    assert verdict.status == "needs_revision"
+    assert verdict.feedback is not None
+
+
+def test_parse_verdict_nonstrict_no_marker():
+    """Non-strict mode with no marker should default to approved."""
+    verdict = _parse_verdict("Some output with no verdict keyword", strict=False)
+    assert verdict.status == "approved"
