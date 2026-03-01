@@ -13,6 +13,12 @@ class WorktreeError(Exception):
 
 async def create_worktree(repo_path: Path, worktree_path: Path, branch: str) -> None:
     """Create a git worktree with a new branch."""
+    # Defense-in-depth: reject paths with traversal components
+    if ".." in worktree_path.parts:
+        raise WorktreeError(
+            f"Worktree path contains '..' traversal component: {worktree_path}"
+        )
+
     if worktree_path.exists():
         raise WorktreeError(f"Worktree path already exists: {worktree_path}")
 
