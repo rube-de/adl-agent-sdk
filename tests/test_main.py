@@ -1,7 +1,6 @@
 """Tests for the main daemon loop."""
 
 import asyncio
-import os
 import signal
 from pathlib import Path
 from unittest.mock import AsyncMock, patch, MagicMock
@@ -189,74 +188,68 @@ def _make_state_store_mock() -> MagicMock:
     return mock_store
 
 
+@pytest.mark.asyncio
 async def test_daemon_loop_handles_sigterm_gracefully():
-    """SIGTERM should cause daemon_loop to exit cleanly, not hang.
+    """SIGTERM handler triggers graceful shutdown after first cycle."""
+    config = _config()
+    config.defaults.poll_interval = 0.01
 
-    The test overrides the default SIGTERM disposition (terminate) so the
-    signal doesn't kill the pytest process.  With no signal handler installed
-    by daemon_loop the loop keeps running until wait_for times out — that's
-    the expected failure until graceful shutdown is implemented.
-    """
-    cfg = _config()
-    cfg.defaults.poll_interval = 0.01
+    mock_store = AsyncMock()
+    mock_store.list_terminal_issue_keys.return_value = set()
 
-    mock_store = _make_state_store_mock()
-    mock_cycle = AsyncMock()
+    registered_handlers: dict = {}
+    real_loop = asyncio.get_running_loop()
 
-    # Track whether the cycle ran at least once
-    cycles: list[int] = []
+    def capture_handler(sig, callback):
+        registered_handlers[sig] = callback
 
-    async def _send_sigterm_after_first_cycle(*args, **kwargs):
-        cycles.append(1)
-        if len(cycles) == 1:
-            os.kill(os.getpid(), signal.SIGTERM)
-
-    mock_cycle.side_effect = _send_sigterm_after_first_cycle
-
-    # Override default SIGTERM disposition so the test process isn't killed.
-    old_handler = signal.signal(signal.SIGTERM, signal.SIG_IGN)
-    try:
-        with patch("auto_dev_loop.main.StateStore", return_value=mock_store):
-            with patch("auto_dev_loop.main.run_poll_cycle", mock_cycle):
-                with patch("auto_dev_loop.main.ADL_HOME") as mock_home:
-                    mock_home.mkdir = MagicMock()
-                    # Should complete quickly once signal handling is implemented;
-                    # currently times out because daemon_loop never sees the signal.
-                    await asyncio.wait_for(daemon_loop(cfg), timeout=2.0)
-    finally:
-        signal.signal(signal.SIGTERM, old_handler)
-
-    assert len(cycles) >= 1
-
-
-async def test_daemon_loop_signal_stops_sleep():
-    """After a signal, the inter-poll sleep should be interrupted immediately.
-
-    poll_interval is set to 60 s so that if the sleep is NOT interrupted the
-    test will time out rather than pass.  Once signal handling is implemented
-    the loop should exit after exactly one cycle.
-    """
-    cfg = _config()
-    cfg.defaults.poll_interval = 60  # long enough that hanging = test failure
-
-    mock_store = _make_state_store_mock()
     cycle_count = 0
 
-    async def _count_and_signal(*args, **kwargs):
+    async def counted_cycle(cfg, state, *, once=False):
         nonlocal cycle_count
         cycle_count += 1
-        if cycle_count == 1:
-            os.kill(os.getpid(), signal.SIGTERM)
+        # Trigger the SIGTERM handler after the first cycle (if registered)
+        if cycle_count == 1 and signal.SIGTERM in registered_handlers:
+            registered_handlers[signal.SIGTERM]()
 
-    old_handler = signal.signal(signal.SIGTERM, signal.SIG_IGN)
-    try:
-        with patch("auto_dev_loop.main.StateStore", return_value=mock_store):
-            with patch("auto_dev_loop.main.run_poll_cycle", side_effect=_count_and_signal):
-                with patch("auto_dev_loop.main.ADL_HOME") as mock_home:
-                    mock_home.mkdir = MagicMock()
-                    await asyncio.wait_for(daemon_loop(cfg), timeout=2.0)
-    finally:
-        signal.signal(signal.SIGTERM, old_handler)
+    with patch("auto_dev_loop.main.StateStore", return_value=mock_store):
+        with patch("auto_dev_loop.main.ADL_HOME"):
+            with patch("auto_dev_loop.main.run_poll_cycle", side_effect=counted_cycle):
+                with patch.object(real_loop, "add_signal_handler", side_effect=capture_handler):
+                    await asyncio.wait_for(daemon_loop(config), timeout=2.0)
 
-    # Exactly one cycle ran before the signal stopped the 60-second sleep
+    assert cycle_count == 1
+
+
+@pytest.mark.asyncio
+async def test_daemon_loop_signal_stops_sleep():
+    """SIGTERM interrupts the inter-poll sleep so the loop exits quickly."""
+    config = _config()
+    config.defaults.poll_interval = 60  # Long sleep — signal must interrupt it
+
+    mock_store = AsyncMock()
+    mock_store.list_terminal_issue_keys.return_value = set()
+
+    registered_handlers: dict = {}
+    real_loop = asyncio.get_running_loop()
+
+    def capture_handler(sig, callback):
+        registered_handlers[sig] = callback
+
+    cycle_count = 0
+
+    async def counted_cycle(cfg, state, *, once=False):
+        nonlocal cycle_count
+        cycle_count += 1
+        if cycle_count == 1 and signal.SIGTERM in registered_handlers:
+            # Trigger shutdown while we're still "in" the cycle — the sleep afterwards should abort
+            registered_handlers[signal.SIGTERM]()
+
+    with patch("auto_dev_loop.main.StateStore", return_value=mock_store):
+        with patch("auto_dev_loop.main.ADL_HOME"):
+            with patch("auto_dev_loop.main.run_poll_cycle", side_effect=counted_cycle):
+                with patch.object(real_loop, "add_signal_handler", side_effect=capture_handler):
+                    await asyncio.wait_for(daemon_loop(config), timeout=2.0)
+
+    # Loop should exit after 1 cycle without sleeping the full 60 seconds
     assert cycle_count == 1
