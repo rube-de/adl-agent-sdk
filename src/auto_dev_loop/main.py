@@ -250,8 +250,7 @@ async def daemon_loop(config: Config, *, once: bool = False) -> None:
                 log.info("--once: exiting after single cycle")
                 return
 
-            if not shutdown_event.is_set():
-                await _interruptible_sleep(poll_interval, shutdown_event)
+            await _interruptible_sleep(poll_interval, shutdown_event)
     finally:
         for sig in (signal.SIGTERM, signal.SIGINT):
             try:
