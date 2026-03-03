@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from typing import Any, Literal
 
 from .models import Issue
 
@@ -15,10 +16,7 @@ class PollError(Exception):
     pass
 
 
-PROJECT_ITEMS_QUERY = """\
-query($owner: String!, $number: Int!) {
-  user(login: $owner) {
-    projectV2(number: $number) {
+_ITEMS_FRAGMENT = """\
       items(first: 100) {
         nodes {
           id
@@ -37,11 +35,56 @@ query($owner: String!, $number: Int!) {
             ... on ProjectV2ItemFieldSingleSelectValue { name }
           }
         }
-      }
-    }
-  }
-}
+      }\
 """
+
+USER_PROJECT_ITEMS_QUERY = f"""\
+query($owner: String!, $number: Int!) {{
+  user(login: $owner) {{
+    projectV2(number: $number) {{
+{_ITEMS_FRAGMENT}
+    }}
+  }}
+}}
+"""
+
+ORG_PROJECT_ITEMS_QUERY = f"""\
+query($owner: String!, $number: Int!) {{
+  organization(login: $owner) {{
+    projectV2(number: $number) {{
+{_ITEMS_FRAGMENT}
+    }}
+  }}
+}}
+"""
+
+# Maps owner_type key -> (query, graphql_response_key).
+_OWNER_CONFIGS: dict[Literal["user", "org"], tuple[str, str]] = {
+    "user": (USER_PROJECT_ITEMS_QUERY, "user"),
+    "org":  (ORG_PROJECT_ITEMS_QUERY, "organization"),
+}
+
+# Maps (owner, project_number) -> "user" | "org".
+# Cached for the process lifetime to avoid redundant queries.
+_owner_type_cache: dict[tuple[str, int], Literal["user", "org"]] = {}
+
+
+async def _run_query(query: str, owner: str, project_number: int) -> dict[str, Any]:
+    """Run a GraphQL query via `gh api graphql` and return the parsed JSON."""
+    proc = await asyncio.create_subprocess_exec(
+        "gh", "api", "graphql",
+        "-f", f"query={query}",
+        "-f", f"owner={owner}",
+        "-F", f"number={project_number}",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+
+    if proc.returncode != 0:
+        raise PollError(f"gh api graphql failed: {stderr.decode().strip()}")
+
+    return json.loads(stdout)
 
 
 def parse_project_items(data: dict, target_column: str) -> list[Issue]:
@@ -82,29 +125,30 @@ async def poll_project_issues(
     project_number: int,
     target_column: str,
 ) -> list[Issue]:
-    """Poll a GitHub Projects V2 board for issues in the target column."""
-    proc = await asyncio.create_subprocess_exec(
-        "gh", "api", "graphql",
-        "-f", f"query={PROJECT_ITEMS_QUERY}",
-        "-f", f"owner={owner}",
-        "-F", f"number={project_number}",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, stderr = await proc.communicate()
+    """Poll a GitHub Projects V2 board for issues in the target column.
 
-    if proc.returncode != 0:
-        raise PollError(f"gh api graphql failed: {stderr.decode().strip()}")
+    Auto-detects whether the project belongs to a user or organization:
+    tries the user query first; falls back to the org query if null.
+    The result is cached per (owner, project_number) for the process lifetime.
+    """
+    cache_key = (owner, project_number)
+    cached_type = _owner_type_cache.get(cache_key)
+    if cached_type:
+        other = "org" if cached_type == "user" else "user"
+        types_to_try: list[Literal["user", "org"]] = [cached_type, other]
+    else:
+        types_to_try = ["user", "org"]
 
-    response = json.loads(stdout)
-    project_data = (
-        response.get("data", {})
-        .get("user", {})
-        .get("projectV2", {})
-    )
+    for owner_type in types_to_try:
+        query, response_key = _OWNER_CONFIGS[owner_type]
+        response = await _run_query(query, owner, project_number)
+        project_data = (
+            (response.get("data") or {}).get(response_key) or {}
+        ).get("projectV2") or {}
 
-    if not project_data:
-        log.warning(f"No project data for {owner}/{project_number}")
-        return []
+        if project_data:
+            _owner_type_cache[cache_key] = owner_type
+            return parse_project_items(project_data, target_column)
 
-    return parse_project_items(project_data, target_column)
+    log.warning("No project data for %s/%s (tried user and org)", owner, project_number)
+    return []
