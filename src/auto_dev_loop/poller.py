@@ -65,6 +65,12 @@ _QUERIES: dict[str, str] = {
     "org": ORG_PROJECT_ITEMS_QUERY,
 }
 
+# Maps the owner_type key to the GraphQL response field name.
+_RESPONSE_KEY: dict[str, str] = {
+    "user": "user",
+    "org": "organization",
+}
+
 
 async def _run_query(query: str, owner: str, project_number: int) -> dict:
     """Run a GraphQL query via `gh api graphql` and return the parsed JSON."""
@@ -122,29 +128,26 @@ async def poll_project_issues(
     project_number: int,
     target_column: str,
 ) -> list[Issue]:
-    """Poll a GitHub Projects V2 board for issues in the target column."""
-    proc = await asyncio.create_subprocess_exec(
-        "gh", "api", "graphql",
-        "-f", f"query={USER_PROJECT_ITEMS_QUERY}",
-        "-f", f"owner={owner}",
-        "-F", f"number={project_number}",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, stderr = await proc.communicate()
+    """Poll a GitHub Projects V2 board for issues in the target column.
 
-    if proc.returncode != 0:
-        raise PollError(f"gh api graphql failed: {stderr.decode().strip()}")
+    Auto-detects whether the project belongs to a user or organization:
+    tries the user query first; falls back to the org query if null.
+    The result is cached per (owner, project_number) for the process lifetime.
+    """
+    cache_key = (owner, project_number)
+    cached_type = _owner_type_cache.get(cache_key)
+    types_to_try = [cached_type] if cached_type else ["user", "org"]
 
-    response = json.loads(stdout)
-    project_data = (
-        response.get("data", {})
-        .get("user", {})
-        .get("projectV2", {})
-    )
+    for owner_type in types_to_try:
+        response = await _run_query(_QUERIES[owner_type], owner, project_number)
+        response_key = _RESPONSE_KEY[owner_type]
+        project_data = (
+            (response.get("data") or {}).get(response_key) or {}
+        ).get("projectV2") or {}
 
-    if not project_data:
-        log.warning(f"No project data for {owner}/{project_number}")
-        return []
+        if project_data:
+            _owner_type_cache[cache_key] = owner_type
+            return parse_project_items(project_data, target_column)
 
-    return parse_project_items(project_data, target_column)
+    log.warning("No project data for %s/%s (tried user and org)", owner, project_number)
+    return []
