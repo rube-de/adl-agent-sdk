@@ -1,5 +1,7 @@
 """Tests for GitHub Projects V2 poller."""
 
+import asyncio
+
 import pytest
 
 import auto_dev_loop.poller as _poller_mod
@@ -102,7 +104,7 @@ async def test_poll_uses_user_query_when_user_project_exists(monkeypatch):
     """User query returns data: result is used and owner type cached as 'user'."""
     user_response = {"data": {"user": {"projectV2": SAMPLE_GH_OUTPUT}}}
 
-    async def fake_run_query(query, owner, project_number):
+    async def fake_run_query(query, owner, project_number, *, cursor=None):
         return user_response
 
     monkeypatch.setattr(_poller_mod, "_run_query", fake_run_query)
@@ -119,7 +121,7 @@ async def test_poll_falls_back_to_org_when_user_returns_null(monkeypatch):
     """User query returns null user: org query is tried and cached as 'org'."""
     call_log = []
 
-    async def fake_run_query(query, owner, project_number):
+    async def fake_run_query(query, owner, project_number, *, cursor=None):
         call_log.append(query)
         if query == _poller_mod.USER_PROJECT_ITEMS_QUERY:
             return {"data": {"user": None}}
@@ -140,7 +142,7 @@ async def test_poll_uses_cached_org_type_without_user_query(monkeypatch):
     """When cache already says 'org', only org query is run (no user query)."""
     call_log = []
 
-    async def fake_run_query(query, owner, project_number):
+    async def fake_run_query(query, owner, project_number, *, cursor=None):
         call_log.append(query)
         return {"data": {"organization": {"projectV2": SAMPLE_GH_OUTPUT}}}
 
@@ -167,7 +169,7 @@ def test_items_fragment_includes_page_info():
 
 async def test_poll_returns_empty_when_neither_user_nor_org_has_project(monkeypatch):
     """Both user and org return null: returns empty list."""
-    async def fake_run_query(query, owner, project_number):
+    async def fake_run_query(query, owner, project_number, *, cursor=None):
         if query == _poller_mod.USER_PROJECT_ITEMS_QUERY:
             return {"data": {"user": None}}
         return {"data": {"organization": None}}
@@ -178,3 +180,41 @@ async def test_poll_returns_empty_when_neither_user_nor_org_has_project(monkeypa
     issues = await _poller_mod.poll_project_issues("nobody", 99, "Ready for Dev")
 
     assert issues == []
+
+
+async def test_run_query_passes_cursor_when_provided(monkeypatch):
+    """_run_query should pass -f cursor=<value> to gh when cursor is not None."""
+    captured_args = []
+
+    async def fake_create_subprocess_exec(*args, **kwargs):
+        captured_args.extend(args)
+
+        class FakeProc:
+            returncode = 0
+            async def communicate(self):
+                return (b'{"data": {}}', b"")
+
+        return FakeProc()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    await _poller_mod._run_query("query {}", "owner", 1, cursor="abc123")
+    assert "cursor=abc123" in captured_args
+
+
+async def test_run_query_omits_cursor_when_none(monkeypatch):
+    """_run_query should NOT pass any cursor arg when cursor is None."""
+    captured_args = []
+
+    async def fake_create_subprocess_exec(*args, **kwargs):
+        captured_args.extend(args)
+
+        class FakeProc:
+            returncode = 0
+            async def communicate(self):
+                return (b'{"data": {}}', b"")
+
+        return FakeProc()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    await _poller_mod._run_query("query {}", "owner", 1, cursor=None)
+    assert not any("cursor" in str(a) for a in captured_args)

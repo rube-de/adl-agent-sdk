@@ -73,13 +73,27 @@ _OWNER_CONFIGS: dict[Literal["user", "org"], tuple[str, str]] = {
 _owner_type_cache: dict[tuple[str, int], Literal["user", "org"]] = {}
 
 
-async def _run_query(query: str, owner: str, project_number: int) -> dict[str, Any]:
+async def _run_query(
+    query: str,
+    owner: str,
+    project_number: int,
+    *,
+    cursor: str | None = None,
+) -> dict[str, Any]:
     """Run a GraphQL query via `gh api graphql` and return the parsed JSON."""
-    proc = await asyncio.create_subprocess_exec(
+    args = [
         "gh", "api", "graphql",
         "-f", f"query={query}",
         "-f", f"owner={owner}",
         "-F", f"number={project_number}",
+    ]
+    # cursor is omitted when None: gh sends null for the nullable $cursor: String
+    # variable, which GraphQL treats as `after: null` (start from the first page).
+    if cursor is not None:
+        args += ["-f", f"cursor={cursor}"]
+
+    proc = await asyncio.create_subprocess_exec(
+        *args,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
