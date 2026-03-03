@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from typing import Any
 
 from .models import Issue
 
@@ -57,22 +58,19 @@ query($owner: String!, $number: Int!) {{
 }}
 """
 
-# Maps (owner, project_number) -> "user" | "org" for the process lifetime.
+# Maps owner_type key -> (query, graphql_response_key).
+_OWNER_CONFIGS: dict[str, tuple[str, str]] = {
+    "user": (USER_PROJECT_ITEMS_QUERY, "user"),
+    "org":  (ORG_PROJECT_ITEMS_QUERY, "organization"),
+}
+
+# Maps (owner, project_number) -> "user" | "org".
+# Cached for the process lifetime. If project ownership transfers between user
+# and org, the cache will be stale until the process restarts.
 _owner_type_cache: dict[tuple[str, int], str] = {}
 
-_QUERIES: dict[str, str] = {
-    "user": USER_PROJECT_ITEMS_QUERY,
-    "org": ORG_PROJECT_ITEMS_QUERY,
-}
 
-# Maps the owner_type key to the GraphQL response field name.
-_RESPONSE_KEY: dict[str, str] = {
-    "user": "user",
-    "org": "organization",
-}
-
-
-async def _run_query(query: str, owner: str, project_number: int) -> dict:
+async def _run_query(query: str, owner: str, project_number: int) -> dict[str, Any]:
     """Run a GraphQL query via `gh api graphql` and return the parsed JSON."""
     proc = await asyncio.create_subprocess_exec(
         "gh", "api", "graphql",
@@ -139,8 +137,8 @@ async def poll_project_issues(
     types_to_try = [cached_type] if cached_type else ["user", "org"]
 
     for owner_type in types_to_try:
-        response = await _run_query(_QUERIES[owner_type], owner, project_number)
-        response_key = _RESPONSE_KEY[owner_type]
+        query, response_key = _OWNER_CONFIGS[owner_type]
+        response = await _run_query(query, owner, project_number)
         project_data = (
             (response.get("data") or {}).get(response_key) or {}
         ).get("projectV2") or {}

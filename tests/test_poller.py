@@ -40,9 +40,6 @@ SAMPLE_GH_OUTPUT = {
     }
 }
 
-# Reusable project-level data (same shape as SAMPLE_GH_OUTPUT, which IS the projectV2 payload)
-SAMPLE_PROJECT_DATA = SAMPLE_GH_OUTPUT
-
 
 def test_parse_project_items_filters_by_column():
     issues = parse_project_items(SAMPLE_GH_OUTPUT, "Ready for Dev")
@@ -103,7 +100,7 @@ def test_parse_project_items_handles_null_content():
 
 async def test_poll_uses_user_query_when_user_project_exists(monkeypatch):
     """User query returns data: result is used and owner type cached as 'user'."""
-    user_response = {"data": {"user": {"projectV2": SAMPLE_PROJECT_DATA}}}
+    user_response = {"data": {"user": {"projectV2": SAMPLE_GH_OUTPUT}}}
 
     async def fake_run_query(query, owner, project_number):
         return user_response
@@ -124,9 +121,9 @@ async def test_poll_falls_back_to_org_when_user_returns_null(monkeypatch):
 
     async def fake_run_query(query, owner, project_number):
         call_log.append(query)
-        if "user(login" in query:
+        if query is _poller_mod.USER_PROJECT_ITEMS_QUERY:
             return {"data": {"user": None}}
-        return {"data": {"organization": {"projectV2": SAMPLE_PROJECT_DATA}}}
+        return {"data": {"organization": {"projectV2": SAMPLE_GH_OUTPUT}}}
 
     monkeypatch.setattr(_poller_mod, "_run_query", fake_run_query)
     monkeypatch.setattr(_poller_mod, "_owner_type_cache", {})
@@ -145,7 +142,7 @@ async def test_poll_uses_cached_org_type_without_user_query(monkeypatch):
 
     async def fake_run_query(query, owner, project_number):
         call_log.append(query)
-        return {"data": {"organization": {"projectV2": SAMPLE_PROJECT_DATA}}}
+        return {"data": {"organization": {"projectV2": SAMPLE_GH_OUTPUT}}}
 
     monkeypatch.setattr(_poller_mod, "_run_query", fake_run_query)
     monkeypatch.setattr(_poller_mod, "_owner_type_cache", {("cachedorg", 3): "org"})
@@ -154,13 +151,13 @@ async def test_poll_uses_cached_org_type_without_user_query(monkeypatch):
 
     assert len(issues) == 1
     assert len(call_log) == 1
-    assert "organization(login" in call_log[0]
+    assert call_log[0] is _poller_mod.ORG_PROJECT_ITEMS_QUERY
 
 
 async def test_poll_returns_empty_when_neither_user_nor_org_has_project(monkeypatch):
     """Both user and org return null: returns empty list."""
     async def fake_run_query(query, owner, project_number):
-        if "user(login" in query:
+        if query is _poller_mod.USER_PROJECT_ITEMS_QUERY:
             return {"data": {"user": None}}
         return {"data": {"organization": None}}
 
