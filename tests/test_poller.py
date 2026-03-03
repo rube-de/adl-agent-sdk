@@ -296,3 +296,25 @@ async def test_fetch_all_items_raises_on_mid_pagination_failure(monkeypatch):
         await _poller_mod._fetch_all_project_items_nodes(
             _poller_mod.USER_PROJECT_ITEMS_QUERY, "user", "myuser", 1
         )
+
+
+async def test_fetch_all_items_warns_when_max_pages_reached(monkeypatch, caplog):
+    """Logs a warning and returns partial results when _MAX_PAGES is exhausted."""
+    import logging
+
+    async def fake_run_query(query, owner, number, *, cursor=None):
+        return {"data": {"user": {"projectV2": {"items": {
+            "nodes": [{"id": f"item_{cursor}"}],
+            "pageInfo": {"hasNextPage": True, "endCursor": f"cursor_{cursor or 0}"},
+        }}}}}
+
+    monkeypatch.setattr(_poller_mod, "_run_query", fake_run_query)
+    monkeypatch.setattr(_poller_mod, "_MAX_PAGES", 3)  # use small limit for test speed
+
+    with caplog.at_level(logging.WARNING, logger="auto_dev_loop.poller"):
+        result = await _poller_mod._fetch_all_project_items_nodes(
+            _poller_mod.USER_PROJECT_ITEMS_QUERY, "user", "myuser", 1
+        )
+
+    assert len(result) == 3  # 3 pages × 1 node each
+    assert any("Pagination limit" in r.message for r in caplog.records)

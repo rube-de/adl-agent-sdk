@@ -144,6 +144,10 @@ async def _fetch_all_project_items_nodes(
         if not page_info.get("hasNextPage"):
             break
         cursor = page_info.get("endCursor")
+        if cursor is None:
+            raise PollError(
+                "hasNextPage is True but endCursor is null; cannot advance pagination"
+            )
     else:
         log.warning(
             "Pagination limit (%d pages) reached for %s project %s; results may be incomplete",
