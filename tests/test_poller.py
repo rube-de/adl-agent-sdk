@@ -218,3 +218,81 @@ async def test_run_query_omits_cursor_when_none(monkeypatch):
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     await _poller_mod._run_query("query {}", "owner", 1, cursor=None)
     assert not any("cursor" in str(a) for a in captured_args)
+
+
+# ---------------------------------------------------------------------------
+# Tests for _fetch_all_project_items_nodes pagination helper
+# ---------------------------------------------------------------------------
+
+async def test_fetch_all_items_returns_none_when_project_not_found(monkeypatch):
+    """Returns None when projectV2 is null (wrong owner type)."""
+    async def fake_run_query(query, owner, number, *, cursor=None):
+        return {"data": {"user": None}}
+
+    monkeypatch.setattr(_poller_mod, "_run_query", fake_run_query)
+    result = await _poller_mod._fetch_all_project_items_nodes(
+        _poller_mod.USER_PROJECT_ITEMS_QUERY, "user", "myuser", 1
+    )
+    assert result is None
+
+
+async def test_fetch_all_items_returns_empty_list_for_empty_project(monkeypatch):
+    """Returns [] when project exists but has no items."""
+    async def fake_run_query(query, owner, number, *, cursor=None):
+        return {"data": {"user": {"projectV2": {"items": {
+            "nodes": [],
+            "pageInfo": {"hasNextPage": False, "endCursor": None},
+        }}}}}
+
+    monkeypatch.setattr(_poller_mod, "_run_query", fake_run_query)
+    result = await _poller_mod._fetch_all_project_items_nodes(
+        _poller_mod.USER_PROJECT_ITEMS_QUERY, "user", "myuser", 1
+    )
+    assert result == []
+
+
+async def test_fetch_all_items_follows_pagination(monkeypatch):
+    """Fetches multiple pages and returns all nodes combined."""
+    page1_node = {"id": "item_p1", "content": {"__typename": "Issue"}, "fieldValueByName": None}
+    page2_node = {"id": "item_p2", "content": {"__typename": "Issue"}, "fieldValueByName": None}
+    call_cursors = []
+
+    async def fake_run_query(query, owner, number, *, cursor=None):
+        call_cursors.append(cursor)
+        if cursor is None:
+            return {"data": {"user": {"projectV2": {"items": {
+                "nodes": [page1_node],
+                "pageInfo": {"hasNextPage": True, "endCursor": "cursor_abc"},
+            }}}}}
+        return {"data": {"user": {"projectV2": {"items": {
+            "nodes": [page2_node],
+            "pageInfo": {"hasNextPage": False, "endCursor": None},
+        }}}}}
+
+    monkeypatch.setattr(_poller_mod, "_run_query", fake_run_query)
+    result = await _poller_mod._fetch_all_project_items_nodes(
+        _poller_mod.USER_PROJECT_ITEMS_QUERY, "user", "myuser", 1
+    )
+    assert result == [page1_node, page2_node]
+    assert call_cursors == [None, "cursor_abc"]
+
+
+async def test_fetch_all_items_raises_on_mid_pagination_failure(monkeypatch):
+    """Raises PollError if project_data disappears after first successful page."""
+    call_count = [0]
+
+    async def fake_run_query(query, owner, number, *, cursor=None):
+        call_count[0] += 1
+        if call_count[0] == 1:
+            return {"data": {"user": {"projectV2": {"items": {
+                "nodes": [{"id": "item_1"}],
+                "pageInfo": {"hasNextPage": True, "endCursor": "cursor_x"},
+            }}}}}
+        # Second page: project vanishes (transient API error / data race)
+        return {"data": {"user": None}}
+
+    monkeypatch.setattr(_poller_mod, "_run_query", fake_run_query)
+    with pytest.raises(_poller_mod.PollError, match="mid-pagination"):
+        await _poller_mod._fetch_all_project_items_nodes(
+            _poller_mod.USER_PROJECT_ITEMS_QUERY, "user", "myuser", 1
+        )

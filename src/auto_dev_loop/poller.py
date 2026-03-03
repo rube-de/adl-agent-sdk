@@ -105,6 +105,54 @@ async def _run_query(
     return json.loads(stdout)
 
 
+_MAX_PAGES = 50
+
+
+async def _fetch_all_project_items_nodes(
+    query: str,
+    response_key: str,
+    owner: str,
+    project_number: int,
+) -> list[dict[str, Any]] | None:
+    """Fetch all project item nodes across paginated GraphQL responses.
+
+    Returns:
+        None   -- project does not exist for this owner type
+        []     -- project exists but has no items
+        [...]  -- all item nodes across all pages
+    """
+    all_nodes: list[dict[str, Any]] = []
+    cursor: str | None = None
+
+    for _ in range(_MAX_PAGES):
+        response = await _run_query(query, owner, project_number, cursor=cursor)
+        project_data = (
+            (response.get("data") or {}).get(response_key) or {}
+        ).get("projectV2") or {}
+
+        if not project_data:
+            if all_nodes:
+                raise PollError(
+                    f"Project data disappeared mid-pagination at cursor {cursor!r}"
+                )
+            return None
+
+        items = project_data.get("items", {})
+        all_nodes.extend(items.get("nodes", []))
+
+        page_info = items.get("pageInfo", {})
+        if not page_info.get("hasNextPage"):
+            break
+        cursor = page_info.get("endCursor")
+    else:
+        log.warning(
+            "Pagination limit (%d pages) reached for %s project %s; results may be incomplete",
+            _MAX_PAGES, owner, project_number,
+        )
+
+    return all_nodes
+
+
 def parse_project_items(data: dict, target_column: str) -> list[Issue]:
     """Parse GraphQL response into Issue list, filtering by column name."""
     issues = []
