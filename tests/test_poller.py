@@ -2,6 +2,7 @@
 
 import pytest
 
+import auto_dev_loop.poller as _poller_mod
 from auto_dev_loop.poller import parse_project_items, PollError
 from auto_dev_loop.models import Issue
 
@@ -99,8 +100,6 @@ def test_parse_project_items_handles_null_content():
 # ---------------------------------------------------------------------------
 # Tests for poll_project_issues auto-detect (user vs org)
 # ---------------------------------------------------------------------------
-import auto_dev_loop.poller as _poller_mod
-
 
 async def test_poll_uses_user_query_when_user_project_exists(monkeypatch):
     """User query returns data: result is used and owner type cached as 'user'."""
