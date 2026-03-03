@@ -154,6 +154,17 @@ async def test_poll_uses_cached_org_type_without_user_query(monkeypatch):
     assert call_log[0] == _poller_mod.ORG_PROJECT_ITEMS_QUERY
 
 
+def test_items_fragment_includes_page_info():
+    """Query strings must declare cursor variable and request pageInfo."""
+    import auto_dev_loop.poller as m
+    for query_str in (m.USER_PROJECT_ITEMS_QUERY, m.ORG_PROJECT_ITEMS_QUERY):
+        assert "$cursor: String" in query_str
+        assert "after: $cursor" in query_str
+        assert "pageInfo" in query_str
+        assert "hasNextPage" in query_str
+        assert "endCursor" in query_str
+
+
 async def test_poll_returns_empty_when_neither_user_nor_org_has_project(monkeypatch):
     """Both user and org return null: returns empty list."""
     async def fake_run_query(query, owner, project_number):

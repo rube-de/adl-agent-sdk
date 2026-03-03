@@ -17,7 +17,7 @@ class PollError(Exception):
 
 
 _ITEMS_FRAGMENT = """\
-      items(first: 100) {
+      items(first: 100, after: $cursor) {
         nodes {
           id
           content {
@@ -35,11 +35,15 @@ _ITEMS_FRAGMENT = """\
             ... on ProjectV2ItemFieldSingleSelectValue { name }
           }
         }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
       }\
 """
 
 USER_PROJECT_ITEMS_QUERY = f"""\
-query($owner: String!, $number: Int!) {{
+query($owner: String!, $number: Int!, $cursor: String) {{
   user(login: $owner) {{
     projectV2(number: $number) {{
 {_ITEMS_FRAGMENT}
@@ -49,7 +53,7 @@ query($owner: String!, $number: Int!) {{
 """
 
 ORG_PROJECT_ITEMS_QUERY = f"""\
-query($owner: String!, $number: Int!) {{
+query($owner: String!, $number: Int!, $cursor: String) {{
   organization(login: $owner) {{
     projectV2(number: $number) {{
 {_ITEMS_FRAGMENT}
