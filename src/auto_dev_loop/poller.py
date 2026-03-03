@@ -66,6 +66,24 @@ _QUERIES: dict[str, str] = {
 }
 
 
+async def _run_query(query: str, owner: str, project_number: int) -> dict:
+    """Run a GraphQL query via `gh api graphql` and return the parsed JSON."""
+    proc = await asyncio.create_subprocess_exec(
+        "gh", "api", "graphql",
+        "-f", f"query={query}",
+        "-f", f"owner={owner}",
+        "-F", f"number={project_number}",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+
+    if proc.returncode != 0:
+        raise PollError(f"gh api graphql failed: {stderr.decode().strip()}")
+
+    return json.loads(stdout)
+
+
 def parse_project_items(data: dict, target_column: str) -> list[Issue]:
     """Parse GraphQL response into Issue list, filtering by column name."""
     issues = []
