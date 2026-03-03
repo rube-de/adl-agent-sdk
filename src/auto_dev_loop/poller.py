@@ -15,10 +15,7 @@ class PollError(Exception):
     pass
 
 
-PROJECT_ITEMS_QUERY = """\
-query($owner: String!, $number: Int!) {
-  user(login: $owner) {
-    projectV2(number: $number) {
+_ITEMS_FRAGMENT = """\
       items(first: 100) {
         nodes {
           id
@@ -37,11 +34,36 @@ query($owner: String!, $number: Int!) {
             ... on ProjectV2ItemFieldSingleSelectValue { name }
           }
         }
-      }
-    }
-  }
-}
+      }\
 """
+
+USER_PROJECT_ITEMS_QUERY = f"""\
+query($owner: String!, $number: Int!) {{
+  user(login: $owner) {{
+    projectV2(number: $number) {{
+{_ITEMS_FRAGMENT}
+    }}
+  }}
+}}
+"""
+
+ORG_PROJECT_ITEMS_QUERY = f"""\
+query($owner: String!, $number: Int!) {{
+  organization(login: $owner) {{
+    projectV2(number: $number) {{
+{_ITEMS_FRAGMENT}
+    }}
+  }}
+}}
+"""
+
+# Maps (owner, project_number) -> "user" | "org" for the process lifetime.
+_owner_type_cache: dict[tuple[str, int], str] = {}
+
+_QUERIES: dict[str, str] = {
+    "user": USER_PROJECT_ITEMS_QUERY,
+    "org": ORG_PROJECT_ITEMS_QUERY,
+}
 
 
 def parse_project_items(data: dict, target_column: str) -> list[Issue]:
