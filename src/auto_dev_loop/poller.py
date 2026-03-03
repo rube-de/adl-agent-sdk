@@ -200,6 +200,7 @@ async def poll_project_issues(
     Auto-detects whether the project belongs to a user or organization:
     tries the user query first; falls back to the org query if null.
     The result is cached per (owner, project_number) for the process lifetime.
+    Fetches all pages of project items via cursor-based pagination.
     """
     cache_key = (owner, project_number)
     cached_type = _owner_type_cache.get(cache_key)
@@ -211,14 +212,11 @@ async def poll_project_issues(
 
     for owner_type in types_to_try:
         query, response_key = _OWNER_CONFIGS[owner_type]
-        response = await _run_query(query, owner, project_number)
-        project_data = (
-            (response.get("data") or {}).get(response_key) or {}
-        ).get("projectV2") or {}
+        all_nodes = await _fetch_all_project_items_nodes(query, response_key, owner, project_number)
 
-        if project_data:
+        if all_nodes is not None:
             _owner_type_cache[cache_key] = owner_type
-            return parse_project_items(project_data, target_column)
+            return parse_project_items({"items": {"nodes": all_nodes}}, target_column)
 
     log.warning("No project data for %s/%s (tried user and org)", owner, project_number)
     return []

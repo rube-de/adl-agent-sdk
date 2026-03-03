@@ -318,3 +318,60 @@ async def test_fetch_all_items_warns_when_max_pages_reached(monkeypatch, caplog)
 
     assert len(result) == 3  # 3 pages × 1 node each
     assert any("Pagination limit" in r.message for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# Integration test: poll_project_issues uses _fetch_all_project_items_nodes
+# ---------------------------------------------------------------------------
+
+async def test_poll_returns_issues_from_all_pages(monkeypatch):
+    """poll_project_issues collects issues across pagination boundaries."""
+    page1_item = {
+        "id": "item_p1",
+        "content": {
+            "__typename": "Issue",
+            "databaseId": 201,
+            "number": 201,
+            "title": "Page 1 Issue",
+            "body": "",
+            "labels": {"nodes": []},
+            "repository": {"nameWithOwner": "o/r"},
+        },
+        "fieldValueByName": {"name": "Ready for Dev"},
+    }
+    page2_item = {
+        "id": "item_p2",
+        "content": {
+            "__typename": "Issue",
+            "databaseId": 202,
+            "number": 202,
+            "title": "Page 2 Issue",
+            "body": "",
+            "labels": {"nodes": []},
+            "repository": {"nameWithOwner": "o/r"},
+        },
+        "fieldValueByName": {"name": "Ready for Dev"},
+    }
+    call_count = [0]
+
+    async def fake_run_query(query, owner, number, *, cursor=None):
+        call_count[0] += 1
+        if cursor is None:
+            return {"data": {"user": {"projectV2": {"items": {
+                "nodes": [page1_item],
+                "pageInfo": {"hasNextPage": True, "endCursor": "cursor_p2"},
+            }}}}}
+        return {"data": {"user": {"projectV2": {"items": {
+            "nodes": [page2_item],
+            "pageInfo": {"hasNextPage": False, "endCursor": None},
+        }}}}}
+
+    monkeypatch.setattr(_poller_mod, "_run_query", fake_run_query)
+    monkeypatch.setattr(_poller_mod, "_owner_type_cache", {})
+
+    issues = await _poller_mod.poll_project_issues("myuser", 1, "Ready for Dev")
+
+    assert len(issues) == 2
+    assert issues[0].number == 201
+    assert issues[1].number == 202
+    assert call_count[0] == 2
