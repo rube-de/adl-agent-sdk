@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any
+from typing import Any, Literal
 
 from .models import Issue
 
@@ -59,15 +59,14 @@ query($owner: String!, $number: Int!) {{
 """
 
 # Maps owner_type key -> (query, graphql_response_key).
-_OWNER_CONFIGS: dict[str, tuple[str, str]] = {
+_OWNER_CONFIGS: dict[Literal["user", "org"], tuple[str, str]] = {
     "user": (USER_PROJECT_ITEMS_QUERY, "user"),
     "org":  (ORG_PROJECT_ITEMS_QUERY, "organization"),
 }
 
 # Maps (owner, project_number) -> "user" | "org".
-# Cached for the process lifetime. If project ownership transfers between user
-# and org, the cache will be stale until the process restarts.
-_owner_type_cache: dict[tuple[str, int], str] = {}
+# Cached for the process lifetime to avoid redundant queries.
+_owner_type_cache: dict[tuple[str, int], Literal["user", "org"]] = {}
 
 
 async def _run_query(query: str, owner: str, project_number: int) -> dict[str, Any]:
@@ -134,7 +133,11 @@ async def poll_project_issues(
     """
     cache_key = (owner, project_number)
     cached_type = _owner_type_cache.get(cache_key)
-    types_to_try = [cached_type] if cached_type else ["user", "org"]
+    if cached_type:
+        other = "org" if cached_type == "user" else "user"
+        types_to_try: list[Literal["user", "org"]] = [cached_type, other]
+    else:
+        types_to_try = ["user", "org"]
 
     for owner_type in types_to_try:
         query, response_key = _OWNER_CONFIGS[owner_type]

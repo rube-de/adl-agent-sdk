@@ -121,7 +121,7 @@ async def test_poll_falls_back_to_org_when_user_returns_null(monkeypatch):
 
     async def fake_run_query(query, owner, project_number):
         call_log.append(query)
-        if query is _poller_mod.USER_PROJECT_ITEMS_QUERY:
+        if query == _poller_mod.USER_PROJECT_ITEMS_QUERY:
             return {"data": {"user": None}}
         return {"data": {"organization": {"projectV2": SAMPLE_GH_OUTPUT}}}
 
@@ -151,13 +151,13 @@ async def test_poll_uses_cached_org_type_without_user_query(monkeypatch):
 
     assert len(issues) == 1
     assert len(call_log) == 1
-    assert call_log[0] is _poller_mod.ORG_PROJECT_ITEMS_QUERY
+    assert call_log[0] == _poller_mod.ORG_PROJECT_ITEMS_QUERY
 
 
 async def test_poll_returns_empty_when_neither_user_nor_org_has_project(monkeypatch):
     """Both user and org return null: returns empty list."""
     async def fake_run_query(query, owner, project_number):
-        if query is _poller_mod.USER_PROJECT_ITEMS_QUERY:
+        if query == _poller_mod.USER_PROJECT_ITEMS_QUERY:
             return {"data": {"user": None}}
         return {"data": {"organization": None}}
 
