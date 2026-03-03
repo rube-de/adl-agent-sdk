@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+import signal
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -188,14 +189,26 @@ async def drain_tasks(state: DaemonState) -> None:
     await asyncio.gather(*state.tasks.values(), return_exceptions=True)
 
 
+async def _interruptible_sleep(seconds: float, shutdown_event: asyncio.Event) -> None:
+    """Sleep for up to `seconds`, but wake early if `shutdown_event` is set."""
+    try:
+        await asyncio.wait_for(shutdown_event.wait(), timeout=seconds)
+    except asyncio.TimeoutError:
+        pass
+
+
 async def daemon_loop(config: Config, *, once: bool = False) -> None:
     """Main daemon loop — poll, process, sleep, repeat.
 
     If *once* is True, run a single poll cycle (processing at most one issue)
     and return.  Useful for CI / integration testing.
+
+    Installs SIGTERM/SIGINT handlers that gracefully drain in-flight tasks
+    before exiting. A second signal force-cancels all tasks.
     """
     state = DaemonState()
     poll_interval = config.defaults.poll_interval
+    shutdown_event = asyncio.Event()
 
     # Persistent state
     ADL_HOME.mkdir(parents=True, exist_ok=True)
@@ -208,13 +221,32 @@ async def daemon_loop(config: Config, *, once: bool = False) -> None:
     if state.completed_keys:
         log.info("Loaded %d completed issue(s) from state DB", len(state.completed_keys))
 
+    def _request_shutdown() -> None:
+        if shutdown_event.is_set():
+            log.warning("Second signal received — force-cancelling tasks")
+            for task in state.tasks.values():
+                task.cancel()
+        else:
+            log.info("Shutdown signal received — draining in-flight tasks…")
+            shutdown_event.set()
+
+    loop = asyncio.get_running_loop()
+    try:
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, _request_shutdown)
+    except NotImplementedError:
+        log.warning(
+            "Signal handlers not supported on this event loop; "
+            "continuing without SIGTERM/SIGINT handlers",
+        )
+
     log.info(
         "ADL daemon starting (poll_interval=%ds, once=%s)",
         poll_interval, once,
     )
 
     try:
-        while True:
+        while not shutdown_event.is_set():
             try:
                 await run_poll_cycle(config, state, once=once)
             except Exception:
@@ -224,8 +256,15 @@ async def daemon_loop(config: Config, *, once: bool = False) -> None:
                 log.info("--once: exiting after single cycle")
                 return
 
-            await asyncio.sleep(poll_interval)
+            await _interruptible_sleep(poll_interval, shutdown_event)
     finally:
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            try:
+                loop.remove_signal_handler(sig)
+            except (NotImplementedError, RuntimeError) as exc:
+                log.debug("Could not remove signal handler for %s: %s", sig, exc)
+            except Exception:
+                log.exception("Unexpected error removing signal handler for %s", sig)
         await drain_tasks(state)
         await store.close()
 

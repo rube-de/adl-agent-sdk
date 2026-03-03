@@ -1,6 +1,7 @@
 """Tests for the main daemon loop."""
 
 import asyncio
+import signal
 from pathlib import Path
 from unittest.mock import AsyncMock, patch, MagicMock
 
@@ -177,3 +178,70 @@ async def test_daemon_loop_once_exits():
         await daemon_loop(_config(), once=True)
 
     mock_cycle.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_daemon_loop_handles_sigterm_gracefully():
+    """SIGTERM handler triggers graceful shutdown after first cycle."""
+    config = _config()
+    config.defaults.poll_interval = 0.01
+
+    mock_store = AsyncMock()
+    mock_store.list_terminal_issue_keys.return_value = set()
+
+    registered_handlers: dict = {}
+    real_loop = asyncio.get_running_loop()
+
+    def capture_handler(sig, callback):
+        registered_handlers[sig] = callback
+
+    cycle_count = 0
+
+    async def counted_cycle(cfg, state, *, once=False):
+        nonlocal cycle_count
+        cycle_count += 1
+        # Trigger the SIGTERM handler after the first cycle (if registered)
+        if cycle_count == 1 and signal.SIGTERM in registered_handlers:
+            registered_handlers[signal.SIGTERM]()
+
+    with patch("auto_dev_loop.main.StateStore", return_value=mock_store):
+        with patch("auto_dev_loop.main.ADL_HOME"):
+            with patch("auto_dev_loop.main.run_poll_cycle", side_effect=counted_cycle):
+                with patch.object(real_loop, "add_signal_handler", side_effect=capture_handler):
+                    await asyncio.wait_for(daemon_loop(config), timeout=2.0)
+
+    assert cycle_count == 1
+
+
+@pytest.mark.asyncio
+async def test_daemon_loop_signal_stops_sleep():
+    """SIGTERM interrupts the inter-poll sleep so the loop exits quickly."""
+    config = _config()
+    config.defaults.poll_interval = 60  # Long sleep — signal must interrupt it
+
+    mock_store = AsyncMock()
+    mock_store.list_terminal_issue_keys.return_value = set()
+
+    registered_handlers: dict = {}
+    real_loop = asyncio.get_running_loop()
+
+    def capture_handler(sig, callback):
+        registered_handlers[sig] = callback
+
+    cycle_count = 0
+
+    async def counted_cycle(cfg, state, *, once=False):
+        nonlocal cycle_count
+        cycle_count += 1
+        if cycle_count == 1 and signal.SIGTERM in registered_handlers:
+            # Trigger shutdown while we're still "in" the cycle — the sleep afterwards should abort
+            registered_handlers[signal.SIGTERM]()
+
+    with patch("auto_dev_loop.main.StateStore", return_value=mock_store):
+        with patch("auto_dev_loop.main.ADL_HOME"):
+            with patch("auto_dev_loop.main.run_poll_cycle", side_effect=counted_cycle):
+                with patch.object(real_loop, "add_signal_handler", side_effect=capture_handler):
+                    await asyncio.wait_for(daemon_loop(config), timeout=2.0)
+
+    # Loop should exit after 1 cycle without sleeping the full 60 seconds
+    assert cycle_count == 1
