@@ -231,9 +231,11 @@ async def daemon_loop(config: Config, *, once: bool = False) -> None:
             shutdown_event.set()
 
     loop = asyncio.get_running_loop()
+    handlers_registered = False
     try:
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, _request_shutdown)
+        handlers_registered = True
     except NotImplementedError:
         log.warning(
             "Signal handlers not supported on this event loop; "
@@ -258,13 +260,14 @@ async def daemon_loop(config: Config, *, once: bool = False) -> None:
 
             await _interruptible_sleep(poll_interval, shutdown_event)
     finally:
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            try:
-                loop.remove_signal_handler(sig)
-            except (NotImplementedError, RuntimeError) as exc:
-                log.debug("Could not remove signal handler for %s: %s", sig, exc)
-            except Exception:
-                log.exception("Unexpected error removing signal handler for %s", sig)
+        if handlers_registered:
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                try:
+                    loop.remove_signal_handler(sig)
+                except (NotImplementedError, RuntimeError) as exc:
+                    log.debug("Could not remove signal handler for %s: %s", sig, exc)
+                except Exception:
+                    log.exception("Unexpected error removing signal handler for %s", sig)
         await drain_tasks(state)
         await store.close()
 
