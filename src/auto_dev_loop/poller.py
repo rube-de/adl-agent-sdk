@@ -107,7 +107,7 @@ async def poll_project_issues(
     """Poll a GitHub Projects V2 board for issues in the target column."""
     proc = await asyncio.create_subprocess_exec(
         "gh", "api", "graphql",
-        "-f", f"query={PROJECT_ITEMS_QUERY}",
+        "-f", f"query={USER_PROJECT_ITEMS_QUERY}",
         "-f", f"owner={owner}",
         "-F", f"number={project_number}",
         stdout=asyncio.subprocess.PIPE,
