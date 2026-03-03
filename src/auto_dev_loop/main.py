@@ -231,8 +231,14 @@ async def daemon_loop(config: Config, *, once: bool = False) -> None:
             shutdown_event.set()
 
     loop = asyncio.get_running_loop()
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, _request_shutdown)
+    try:
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, _request_shutdown)
+    except NotImplementedError:
+        log.warning(
+            "Signal handlers not supported on this event loop; "
+            "continuing without SIGTERM/SIGINT handlers",
+        )
 
     log.info(
         "ADL daemon starting (poll_interval=%ds, once=%s)",
@@ -255,8 +261,10 @@ async def daemon_loop(config: Config, *, once: bool = False) -> None:
         for sig in (signal.SIGTERM, signal.SIGINT):
             try:
                 loop.remove_signal_handler(sig)
+            except (NotImplementedError, RuntimeError) as exc:
+                log.debug("Could not remove signal handler for %s: %s", sig, exc)
             except Exception:
-                pass
+                log.exception("Unexpected error removing signal handler for %s", sig)
         await drain_tasks(state)
         await store.close()
 

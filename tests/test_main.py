@@ -180,14 +180,6 @@ async def test_daemon_loop_once_exits():
     mock_cycle.assert_awaited_once()
 
 
-def _make_state_store_mock() -> MagicMock:
-    mock_store = MagicMock()
-    mock_store.init = AsyncMock()
-    mock_store.close = AsyncMock()
-    mock_store.list_terminal_issue_keys = AsyncMock(return_value=set())
-    return mock_store
-
-
 @pytest.mark.asyncio
 async def test_daemon_loop_handles_sigterm_gracefully():
     """SIGTERM handler triggers graceful shutdown after first cycle."""
