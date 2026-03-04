@@ -186,8 +186,13 @@ async def test_retry_after_does_not_block_other_items():
 
     drain_task = asyncio.create_task(outbox.drain_loop())
 
-    # Wait well under RETRY_DELAY — blocking impl would not have processed DELETE yet
-    await asyncio.sleep(0.2)
+    # Poll until DELETE is processed (non-blocking) or timeout at well under RETRY_DELAY
+    max_wait = RETRY_DELAY - 0.1
+    poll_interval = 0.01
+    waited = 0.0
+    while not any(c[0] == "delete_message" for c in client.calls) and waited < max_wait:
+        await asyncio.sleep(poll_interval)
+        waited += poll_interval
     drain_task.cancel()
 
     delete_calls = [c for c in client.calls if c[0] == "delete_message"]
@@ -227,7 +232,14 @@ async def test_requeue_tasks_are_tracked_then_cleaned():
     await outbox.enqueue_send(1, "hello")
 
     drain_task = asyncio.create_task(outbox.drain_loop())
-    await asyncio.sleep(0.05)  # let drain hit RetryAfter and schedule requeue
+
+    # Poll until the requeue task has been scheduled, or timeout.
+    max_wait = 0.5
+    poll_interval = 0.01
+    waited = 0.0
+    while len(outbox._requeue_tasks) < 1 and waited < max_wait:
+        await asyncio.sleep(poll_interval)
+        waited += poll_interval
 
     # Task must be tracked while delay is still running
     assert len(outbox._requeue_tasks) == 1
