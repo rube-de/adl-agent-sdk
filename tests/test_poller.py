@@ -9,42 +9,41 @@ from auto_dev_loop.poller import parse_project_items, PollError
 from auto_dev_loop.models import Issue
 
 
-SAMPLE_GH_OUTPUT = {
-    "items": {
-        "nodes": [
-            {
-                "id": "item_1",
-                "content": {
-                    "__typename": "Issue",
-                    "databaseId": 100042,
-                    "number": 42,
-                    "title": "Fix auth bug",
-                    "body": "The login page crashes",
-                    "labels": {"nodes": [{"name": "bug"}]},
-                    "repository": {"nameWithOwner": "owner/repo"},
-                },
-                "fieldValueByName": {"name": "Ready for Dev"},
-            },
-            {
-                "id": "item_2",
-                "content": {
-                    "__typename": "Issue",
-                    "databaseId": 100043,
-                    "number": 43,
-                    "title": "Add docs",
-                    "body": "Need API docs",
-                    "labels": {"nodes": [{"name": "docs"}]},
-                    "repository": {"nameWithOwner": "owner/repo"},
-                },
-                "fieldValueByName": {"name": "In Progress"},
-            },
-        ]
-    }
-}
+SAMPLE_NODES = [
+    {
+        "id": "item_1",
+        "content": {
+            "__typename": "Issue",
+            "databaseId": 100042,
+            "number": 42,
+            "title": "Fix auth bug",
+            "body": "The login page crashes",
+            "labels": {"nodes": [{"name": "bug"}]},
+            "repository": {"nameWithOwner": "owner/repo"},
+        },
+        "fieldValueByName": {"name": "Ready for Dev"},
+    },
+    {
+        "id": "item_2",
+        "content": {
+            "__typename": "Issue",
+            "databaseId": 100043,
+            "number": 43,
+            "title": "Add docs",
+            "body": "Need API docs",
+            "labels": {"nodes": [{"name": "docs"}]},
+            "repository": {"nameWithOwner": "owner/repo"},
+        },
+        "fieldValueByName": {"name": "In Progress"},
+    },
+]
+
+# Used in poll tests as a fake GraphQL projectV2 response body.
+SAMPLE_GH_OUTPUT = {"items": {"nodes": SAMPLE_NODES}}
 
 
 def test_parse_project_items_filters_by_column():
-    issues = parse_project_items(SAMPLE_GH_OUTPUT, "Ready for Dev")
+    issues = parse_project_items(SAMPLE_NODES, "Ready for Dev")
     assert len(issues) == 1
     assert issues[0].id == 100042
     assert issues[0].number == 42
@@ -55,8 +54,8 @@ def test_parse_project_items_filters_by_column():
 
 def test_parse_project_items_unique_ids():
     """Each issue gets its globally unique databaseId, not a hardcoded 0."""
-    issues = parse_project_items(SAMPLE_GH_OUTPUT, "Ready for Dev")
-    in_progress = parse_project_items(SAMPLE_GH_OUTPUT, "In Progress")
+    issues = parse_project_items(SAMPLE_NODES, "Ready for Dev")
+    in_progress = parse_project_items(SAMPLE_NODES, "In Progress")
     all_issues = issues + in_progress
     ids = [i.id for i in all_issues]
     assert ids == [100042, 100043]
@@ -64,35 +63,27 @@ def test_parse_project_items_unique_ids():
 
 
 def test_parse_project_items_empty():
-    issues = parse_project_items({"items": {"nodes": []}}, "Ready for Dev")
+    issues = parse_project_items([], "Ready for Dev")
     assert issues == []
 
 
 def test_parse_project_items_skips_pull_requests():
-    data = {
-        "items": {
-            "nodes": [{
-                "id": "item_3",
-                "content": {"__typename": "PullRequest"},
-                "fieldValueByName": {"name": "Ready for Dev"},
-            }]
-        }
-    }
-    issues = parse_project_items(data, "Ready for Dev")
+    nodes = [{
+        "id": "item_3",
+        "content": {"__typename": "PullRequest"},
+        "fieldValueByName": {"name": "Ready for Dev"},
+    }]
+    issues = parse_project_items(nodes, "Ready for Dev")
     assert issues == []
 
 
 def test_parse_project_items_handles_null_content():
-    data = {
-        "items": {
-            "nodes": [{
-                "id": "item_4",
-                "content": None,
-                "fieldValueByName": {"name": "Ready for Dev"},
-            }]
-        }
-    }
-    issues = parse_project_items(data, "Ready for Dev")
+    nodes = [{
+        "id": "item_4",
+        "content": None,
+        "fieldValueByName": {"name": "Ready for Dev"},
+    }]
+    issues = parse_project_items(nodes, "Ready for Dev")
     assert issues == []
 
 
@@ -279,11 +270,12 @@ async def test_fetch_all_items_follows_pagination(monkeypatch):
 
 async def test_fetch_all_items_raises_on_mid_pagination_failure(monkeypatch):
     """Raises PollError if project_data disappears after first successful page."""
-    call_count = [0]
+    call_count = 0
 
     async def fake_run_query(query, owner, number, *, cursor=None):
-        call_count[0] += 1
-        if call_count[0] == 1:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
             return {"data": {"user": {"projectV2": {"items": {
                 "nodes": [{"id": "item_1"}],
                 "pageInfo": {"hasNextPage": True, "endCursor": "cursor_x"},
@@ -352,10 +344,11 @@ async def test_poll_returns_issues_from_all_pages(monkeypatch):
         },
         "fieldValueByName": {"name": "Ready for Dev"},
     }
-    call_count = [0]
+    call_count = 0
 
     async def fake_run_query(query, owner, number, *, cursor=None):
-        call_count[0] += 1
+        nonlocal call_count
+        call_count += 1
         if cursor is None:
             return {"data": {"user": {"projectV2": {"items": {
                 "nodes": [page1_item],
@@ -374,4 +367,4 @@ async def test_poll_returns_issues_from_all_pages(monkeypatch):
     assert len(issues) == 2
     assert issues[0].number == 201
     assert issues[1].number == 202
-    assert call_count[0] == 2
+    assert call_count == 2

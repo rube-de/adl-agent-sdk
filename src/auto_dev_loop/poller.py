@@ -81,6 +81,13 @@ async def _run_query(
     cursor: str | None = None,
 ) -> dict[str, Any]:
     """Run a GraphQL query via `gh api graphql` and return the parsed JSON."""
+    # gh api interprets values starting with '@' as file paths (-f flag behavior).
+    # Reject such values to prevent local file disclosure via argument injection.
+    if owner.startswith("@"):
+        raise PollError(f"Invalid owner: {owner!r} cannot start with '@'")
+    if cursor is not None and cursor.startswith("@"):
+        raise PollError(f"Unsafe cursor: {cursor!r} cannot start with '@'")
+
     args = [
         "gh", "api", "graphql",
         "-f", f"query={query}",
@@ -90,7 +97,7 @@ async def _run_query(
     # cursor is omitted when None: gh sends null for the nullable $cursor: String
     # variable, which GraphQL treats as `after: null` (start from the first page).
     if cursor is not None:
-        args += ["-f", f"cursor={cursor}"]
+        args.extend(["-f", f"cursor={cursor}"])
 
     proc = await asyncio.create_subprocess_exec(
         *args,
@@ -102,7 +109,19 @@ async def _run_query(
     if proc.returncode != 0:
         raise PollError(f"gh api graphql failed: {stderr.decode().strip()}")
 
-    return json.loads(stdout)
+    resp = json.loads(stdout)
+    errors = resp.get("errors")
+    if errors:
+        messages = [
+            str(err["message"]) if isinstance(err, dict) and "message" in err else str(err)
+            for err in errors
+        ]
+        raise PollError(
+            f"gh api graphql returned errors: {'; '.join(messages) or 'unknown GraphQL error'}"
+        )
+    if resp.get("data") is None:
+        raise PollError("gh api graphql returned no 'data' in response")
+    return resp
 
 
 _MAX_PAGES = 50
@@ -157,10 +176,9 @@ async def _fetch_all_project_items_nodes(
     return all_nodes
 
 
-def parse_project_items(data: dict, target_column: str) -> list[Issue]:
-    """Parse GraphQL response into Issue list, filtering by column name."""
+def parse_project_items(nodes: list[dict[str, Any]], target_column: str) -> list[Issue]:
+    """Parse project item nodes into Issue list, filtering by column name."""
     issues = []
-    nodes = data.get("items", {}).get("nodes", [])
 
     for item in nodes:
         content = item.get("content")
@@ -216,7 +234,7 @@ async def poll_project_issues(
 
         if all_nodes is not None:
             _owner_type_cache[cache_key] = owner_type
-            return parse_project_items({"items": {"nodes": all_nodes}}, target_column)
+            return parse_project_items(all_nodes, target_column)
 
     log.warning("No project data for %s/%s (tried user and org)", owner, project_number)
     return []
