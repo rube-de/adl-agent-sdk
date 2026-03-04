@@ -76,6 +76,11 @@ class TelegramOutbox:
             kwargs={"chat_id": chat_id, "message_id": message_id},
         ))
 
+    async def _delayed_requeue(self, item: OutboxItem, delay: float) -> None:
+        """Re-enqueue *item* after *delay* seconds without blocking the drain loop."""
+        await asyncio.sleep(delay)
+        await self._queue.put(item)
+
     async def drain_loop(self) -> None:
         """Background task: process outbox queue forever."""
         while True:
@@ -85,19 +90,24 @@ class TelegramOutbox:
             if item.message_key:
                 if item.message_key not in self._pending_edits:
                     continue
-                # Honor RetryAfter backoff BEFORE popping so that new
-                # enqueue_edit calls arriving during the sleep can still
-                # coalesce into _pending_edits[key].
+                # Honor RetryAfter backoff: re-queue non-blocking so that
+                # higher-priority items are not blocked during the wait.
                 now = time.monotonic()
                 pending = self._pending_edits[item.message_key]
                 if pending.retry_at > now:
-                    await asyncio.sleep(pending.retry_at - now)
+                    asyncio.create_task(
+                        self._delayed_requeue(item, pending.retry_at - now)
+                    )
+                    continue
                 item = self._pending_edits.pop(item.message_key)
             else:
-                # Honor RetryAfter backoff
+                # Honor RetryAfter backoff: re-queue non-blocking.
                 now = time.monotonic()
                 if item.retry_at > now:
-                    await asyncio.sleep(item.retry_at - now)
+                    asyncio.create_task(
+                        self._delayed_requeue(item, item.retry_at - now)
+                    )
+                    continue
 
             try:
                 result = await getattr(self._client, item.method)(**item.kwargs)
@@ -107,7 +117,7 @@ class TelegramOutbox:
                 item.retry_at = time.monotonic() + e.retry_after
                 if item.message_key:
                     self._pending_edits[item.message_key] = item
-                await self._queue.put(item)
+                asyncio.create_task(self._delayed_requeue(item, e.retry_after))
             except (BotApiError, Exception) as e:
                 log.warning(f"Outbox item failed: {e}")
                 if item.future and not item.future.done():
