@@ -147,3 +147,50 @@ async def test_send_failure_propagates_exception():
 
     assert exc_info.value.code == 400
     drain_task.cancel()
+
+
+@pytest.mark.asyncio
+async def test_retry_after_does_not_block_other_items():
+    """A rate-limited SEND must not block a subsequent DELETE."""
+    from auto_dev_loop.telegram.models import RetryAfter
+
+    RETRY_DELAY = 0.5  # long enough to make blocking obvious
+
+    class RetryOnceSendClient:
+        def __init__(self):
+            self.calls: list[tuple[str, dict]] = []
+            self._send_count = 0
+
+        async def send_message(self, **kw):
+            self._send_count += 1
+            if self._send_count == 1:
+                raise RetryAfter(retry_after=RETRY_DELAY)
+            self.calls.append(("send_message", kw))
+
+            class FakeMsg:
+                message_id = 1
+            return FakeMsg()
+
+        async def delete_message(self, **kw):
+            self.calls.append(("delete_message", kw))
+
+        async def edit_message_text(self, **kw):
+            self.calls.append(("edit_message_text", kw))
+
+    client = RetryOnceSendClient()
+    outbox = TelegramOutbox(client)
+
+    # Enqueue a SEND (will hit RetryAfter first dispatch), then a DELETE
+    _future = await outbox.enqueue_send(1, "hello")
+    await outbox.enqueue_delete(1, 999)
+
+    drain_task = asyncio.create_task(outbox.drain_loop())
+
+    # Wait well under RETRY_DELAY — blocking impl would not have processed DELETE yet
+    await asyncio.sleep(0.2)
+    drain_task.cancel()
+
+    delete_calls = [c for c in client.calls if c[0] == "delete_message"]
+    assert len(delete_calls) == 1, (
+        "DELETE should have been processed before SEND's retry window expired"
+    )
