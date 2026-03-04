@@ -83,8 +83,13 @@ class TelegramOutbox:
         await self._queue.put(item)
 
     def _schedule_requeue(self, item: OutboxItem, delay: float) -> None:
-        """Schedule a non-blocking re-enqueue, keeping a strong task reference."""
-        task = asyncio.create_task(self._delayed_requeue(item, delay))
+        """Schedule a non-blocking re-enqueue, keeping a strong task reference.
+
+        Must be called from within a running event loop (i.e., from a coroutine
+        or a callback scheduled on the loop).
+        """
+        loop = asyncio.get_running_loop()
+        task = loop.create_task(self._delayed_requeue(item, delay))
         self._requeue_tasks.add(task)
         task.add_done_callback(self._requeue_tasks.discard)
 

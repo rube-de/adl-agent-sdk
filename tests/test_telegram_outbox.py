@@ -194,3 +194,46 @@ async def test_retry_after_does_not_block_other_items():
     assert len(delete_calls) == 1, (
         "DELETE should have been processed before SEND's retry window expired"
     )
+
+
+@pytest.mark.asyncio
+async def test_requeue_tasks_are_tracked_then_cleaned():
+    """Delayed requeue tasks are held in _requeue_tasks and removed on completion."""
+    from auto_dev_loop.telegram.models import RetryAfter
+
+    RETRY_DELAY = 0.3
+
+    class RetryOnceClient:
+        def __init__(self):
+            self._sent = 0
+
+        async def send_message(self, **kw):
+            self._sent += 1
+            if self._sent == 1:
+                raise RetryAfter(retry_after=RETRY_DELAY)
+
+            class FakeMsg:
+                message_id = 1
+            return FakeMsg()
+
+        async def edit_message_text(self, **kw):
+            pass
+
+        async def delete_message(self, **kw):
+            pass
+
+    client = RetryOnceClient()
+    outbox = TelegramOutbox(client)
+    await outbox.enqueue_send(1, "hello")
+
+    drain_task = asyncio.create_task(outbox.drain_loop())
+    await asyncio.sleep(0.05)  # let drain hit RetryAfter and schedule requeue
+
+    # Task must be tracked while delay is still running
+    assert len(outbox._requeue_tasks) == 1
+
+    await asyncio.sleep(RETRY_DELAY + 0.1)  # past the retry window
+    drain_task.cancel()
+
+    # After completion the set must be empty (done-callback fired)
+    assert len(outbox._requeue_tasks) == 0
