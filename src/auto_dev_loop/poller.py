@@ -17,7 +17,7 @@ class PollError(Exception):
 
 
 _ITEMS_FRAGMENT = """\
-      items(first: 100) {
+      items(first: 100, after: $cursor) {
         nodes {
           id
           content {
@@ -35,11 +35,15 @@ _ITEMS_FRAGMENT = """\
             ... on ProjectV2ItemFieldSingleSelectValue { name }
           }
         }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
       }\
 """
 
 USER_PROJECT_ITEMS_QUERY = f"""\
-query($owner: String!, $number: Int!) {{
+query($owner: String!, $number: Int!, $cursor: String) {{
   user(login: $owner) {{
     projectV2(number: $number) {{
 {_ITEMS_FRAGMENT}
@@ -49,7 +53,7 @@ query($owner: String!, $number: Int!) {{
 """
 
 ORG_PROJECT_ITEMS_QUERY = f"""\
-query($owner: String!, $number: Int!) {{
+query($owner: String!, $number: Int!, $cursor: String) {{
   organization(login: $owner) {{
     projectV2(number: $number) {{
 {_ITEMS_FRAGMENT}
@@ -69,13 +73,34 @@ _OWNER_CONFIGS: dict[Literal["user", "org"], tuple[str, str]] = {
 _owner_type_cache: dict[tuple[str, int], Literal["user", "org"]] = {}
 
 
-async def _run_query(query: str, owner: str, project_number: int) -> dict[str, Any]:
+async def _run_query(
+    query: str,
+    owner: str,
+    project_number: int,
+    *,
+    cursor: str | None = None,
+) -> dict[str, Any]:
     """Run a GraphQL query via `gh api graphql` and return the parsed JSON."""
-    proc = await asyncio.create_subprocess_exec(
+    # gh api interprets values starting with '@' as file paths (-f flag behavior).
+    # Reject such values to prevent local file disclosure via argument injection.
+    if owner.startswith("@"):
+        raise PollError(f"Invalid owner: {owner!r} cannot start with '@'")
+    if cursor is not None and cursor.startswith("@"):
+        raise PollError(f"Unsafe cursor: {cursor!r} cannot start with '@'")
+
+    args = [
         "gh", "api", "graphql",
         "-f", f"query={query}",
         "-f", f"owner={owner}",
         "-F", f"number={project_number}",
+    ]
+    # cursor is omitted when None: gh sends null for the nullable $cursor: String
+    # variable, which GraphQL treats as `after: null` (start from the first page).
+    if cursor is not None:
+        args.extend(["-f", f"cursor={cursor}"])
+
+    proc = await asyncio.create_subprocess_exec(
+        *args,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -84,13 +109,76 @@ async def _run_query(query: str, owner: str, project_number: int) -> dict[str, A
     if proc.returncode != 0:
         raise PollError(f"gh api graphql failed: {stderr.decode().strip()}")
 
-    return json.loads(stdout)
+    resp = json.loads(stdout)
+    errors = resp.get("errors")
+    if errors:
+        messages = [
+            str(err["message"]) if isinstance(err, dict) and "message" in err else str(err)
+            for err in errors
+        ]
+        raise PollError(
+            f"gh api graphql returned errors: {'; '.join(messages) or 'unknown GraphQL error'}"
+        )
+    if resp.get("data") is None:
+        raise PollError("gh api graphql returned no 'data' in response")
+    return resp
 
 
-def parse_project_items(data: dict, target_column: str) -> list[Issue]:
-    """Parse GraphQL response into Issue list, filtering by column name."""
+_MAX_PAGES = 50
+
+
+async def _fetch_all_project_items_nodes(
+    query: str,
+    response_key: str,
+    owner: str,
+    project_number: int,
+) -> list[dict[str, Any]] | None:
+    """Fetch all project item nodes across paginated GraphQL responses.
+
+    Returns:
+        None   -- project does not exist for this owner type
+        []     -- project exists but has no items
+        [...]  -- all item nodes across all pages
+    """
+    all_nodes: list[dict[str, Any]] = []
+    cursor: str | None = None
+
+    for _ in range(_MAX_PAGES):
+        response = await _run_query(query, owner, project_number, cursor=cursor)
+        project_data = (
+            (response.get("data") or {}).get(response_key) or {}
+        ).get("projectV2") or {}
+
+        if not project_data:
+            if all_nodes:
+                raise PollError(
+                    f"Project data disappeared mid-pagination at cursor {cursor!r}"
+                )
+            return None
+
+        items = project_data.get("items", {})
+        all_nodes.extend(items.get("nodes", []))
+
+        page_info = items.get("pageInfo", {})
+        if not page_info.get("hasNextPage"):
+            break
+        cursor = page_info.get("endCursor")
+        if cursor is None:
+            raise PollError(
+                "hasNextPage is True but endCursor is null; cannot advance pagination"
+            )
+    else:
+        log.warning(
+            "Pagination limit (%d pages) reached for %s project %s; results may be incomplete",
+            _MAX_PAGES, owner, project_number,
+        )
+
+    return all_nodes
+
+
+def parse_project_items(nodes: list[dict[str, Any]], target_column: str) -> list[Issue]:
+    """Parse project item nodes into Issue list, filtering by column name."""
     issues = []
-    nodes = data.get("items", {}).get("nodes", [])
 
     for item in nodes:
         content = item.get("content")
@@ -130,6 +218,7 @@ async def poll_project_issues(
     Auto-detects whether the project belongs to a user or organization:
     tries the user query first; falls back to the org query if null.
     The result is cached per (owner, project_number) for the process lifetime.
+    Fetches all pages of project items via cursor-based pagination.
     """
     cache_key = (owner, project_number)
     cached_type = _owner_type_cache.get(cache_key)
@@ -141,14 +230,11 @@ async def poll_project_issues(
 
     for owner_type in types_to_try:
         query, response_key = _OWNER_CONFIGS[owner_type]
-        response = await _run_query(query, owner, project_number)
-        project_data = (
-            (response.get("data") or {}).get(response_key) or {}
-        ).get("projectV2") or {}
+        all_nodes = await _fetch_all_project_items_nodes(query, response_key, owner, project_number)
 
-        if project_data:
+        if all_nodes is not None:
             _owner_type_cache[cache_key] = owner_type
-            return parse_project_items(project_data, target_column)
+            return parse_project_items(all_nodes, target_column)
 
     log.warning("No project data for %s/%s (tried user and org)", owner, project_number)
     return []
