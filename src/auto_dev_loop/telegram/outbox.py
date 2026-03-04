@@ -38,6 +38,7 @@ class TelegramOutbox:
         self._queue: asyncio.PriorityQueue[OutboxItem] = asyncio.PriorityQueue()
         self._pending_edits: dict[str, OutboxItem] = {}
         self._seq = 0
+        self._requeue_tasks: set[asyncio.Task] = set()
 
     def _next_seq(self) -> int:
         self._seq += 1
@@ -81,6 +82,12 @@ class TelegramOutbox:
         await asyncio.sleep(delay)
         await self._queue.put(item)
 
+    def _schedule_requeue(self, item: OutboxItem, delay: float) -> None:
+        """Schedule a non-blocking re-enqueue, keeping a strong task reference."""
+        task = asyncio.create_task(self._delayed_requeue(item, delay))
+        self._requeue_tasks.add(task)
+        task.add_done_callback(self._requeue_tasks.discard)
+
     async def drain_loop(self) -> None:
         """Background task: process outbox queue forever."""
         while True:
@@ -95,18 +102,14 @@ class TelegramOutbox:
                 now = time.monotonic()
                 pending = self._pending_edits[item.message_key]
                 if pending.retry_at > now:
-                    asyncio.create_task(
-                        self._delayed_requeue(item, pending.retry_at - now)
-                    )
+                    self._schedule_requeue(item, pending.retry_at - now)
                     continue
                 item = self._pending_edits.pop(item.message_key)
             else:
                 # Honor RetryAfter backoff: re-queue non-blocking.
                 now = time.monotonic()
                 if item.retry_at > now:
-                    asyncio.create_task(
-                        self._delayed_requeue(item, item.retry_at - now)
-                    )
+                    self._schedule_requeue(item, item.retry_at - now)
                     continue
 
             try:
@@ -117,7 +120,7 @@ class TelegramOutbox:
                 item.retry_at = time.monotonic() + e.retry_after
                 if item.message_key:
                     self._pending_edits[item.message_key] = item
-                asyncio.create_task(self._delayed_requeue(item, e.retry_after))
+                self._schedule_requeue(item, e.retry_after)
             except (BotApiError, Exception) as e:
                 log.warning(f"Outbox item failed: {e}")
                 if item.future and not item.future.done():
