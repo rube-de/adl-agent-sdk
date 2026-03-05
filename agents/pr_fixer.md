@@ -22,5 +22,5 @@ You will receive the PR diff and reviewer comments extracted from GitHub.
 ## Output
 
 End your response with:
-- `FIXES_APPLIED` — all comments addressed
+- `<<<VERDICT:FIXES_APPLIED>>>` — all comments addressed
 - `BLOCKED` — some comments require human clarification

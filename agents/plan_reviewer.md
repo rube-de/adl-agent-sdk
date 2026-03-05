@@ -21,9 +21,9 @@ correctness, and feasibility.
 
 End your response with exactly one of these markers on its own line:
 
-APPROVED
+<<<VERDICT:APPROVED>>>
 — or —
-NEEDS_REVISION
+<<<VERDICT:NEEDS_REVISION>>>
 
-If NEEDS_REVISION, include a `## Feedback` section before the marker
+If <<<VERDICT:NEEDS_REVISION>>>, include a `## Feedback` section before the marker
 with specific, actionable items.

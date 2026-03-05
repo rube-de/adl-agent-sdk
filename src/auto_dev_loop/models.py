@@ -6,14 +6,14 @@ from dataclasses import dataclass, field
 
 # Verdict markers emitted by agents and parsed by the workflow engine.
 # Keep in sync: dispatcher produces these, workflow_engine/review_parser consume them.
-VERDICT_APPROVED = "APPROVED"
-VERDICT_NEEDS_REVISION = "NEEDS_REVISION"
-VERDICT_VETOED = "VETOED"
-VERDICT_PLAN_READY = "PLAN_READY"
-VERDICT_TESTS_PASSING = "TESTS_PASSING"
-VERDICT_IMPLEMENTATION_COMPLETE = "IMPLEMENTATION_COMPLETE"
-VERDICT_FIXES_APPLIED = "FIXES_APPLIED"
-VERDICT_FEEDBACK_APPLIED = "FEEDBACK_APPLIED"
+VERDICT_APPROVED = "<<<VERDICT:APPROVED>>>"
+VERDICT_NEEDS_REVISION = "<<<VERDICT:NEEDS_REVISION>>>"
+VERDICT_VETOED = "<<<VERDICT:VETOED>>>"
+VERDICT_PLAN_READY = "<<<VERDICT:PLAN_READY>>>"
+VERDICT_TESTS_PASSING = "<<<VERDICT:TESTS_PASSING>>>"
+VERDICT_IMPLEMENTATION_COMPLETE = "<<<VERDICT:IMPLEMENTATION_COMPLETE>>>"
+VERDICT_FIXES_APPLIED = "<<<VERDICT:FIXES_APPLIED>>>"
+VERDICT_FEEDBACK_APPLIED = "<<<VERDICT:FEEDBACK_APPLIED>>>"
 
 # Issue states that represent terminal (finished) processing.
 TERMINAL_ISSUE_STATES = frozenset({"completed", "failed", "escalated"})
@@ -27,6 +27,23 @@ APPROVED_MARKERS = frozenset({
     VERDICT_FIXES_APPLIED,
     VERDICT_FEEDBACK_APPLIED,
 })
+
+
+def has_verdict_line(output: str, marker: str) -> bool:
+    """Check if a verdict marker appears on its own line in output."""
+    return any(line.strip() == marker for line in output.splitlines())
+
+
+def fence_untrusted(content: str, label: str) -> str:
+    """Wrap untrusted content with XML boundary markers.
+
+    Helps LLM agents distinguish trusted instructions from user-provided
+    data that may contain prompt injection payloads.
+    """
+    import re
+    safe_label = re.sub(r'[^a-zA-Z0-9_-]', '_', label)
+    escaped = content.replace("</untrusted>", "&lt;/untrusted&gt;")
+    return f'<untrusted source="{safe_label}">\n{escaped}\n</untrusted>'
 
 
 @dataclass

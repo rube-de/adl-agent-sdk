@@ -27,5 +27,5 @@ You will receive:
 ## Output
 
 End your response with:
-- `IMPLEMENTATION_COMPLETE` — all changes applied and tests pass
+- `<<<VERDICT:IMPLEMENTATION_COMPLETE>>>` — all changes applied and tests pass
 - `BLOCKED` — followed by description of what's blocking progress

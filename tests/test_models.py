@@ -10,6 +10,7 @@ from auto_dev_loop.models import (
     ReviewVerdict,
     StageState,
     WorkflowResult,
+    VERDICT_APPROVED,
 )
 
 
@@ -64,7 +65,7 @@ def test_workflow_result():
 def test_review_iteration():
     ri = ReviewIteration(
         cycle=1, iteration=1,
-        worker_output="diff", reviewer_output="APPROVED",
+        worker_output="diff", reviewer_output=VERDICT_APPROVED,
         approved=True,
     )
     assert ri.approved is True

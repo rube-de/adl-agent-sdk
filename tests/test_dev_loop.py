@@ -1,7 +1,7 @@
 """Tests for the Agent Teams dev loop."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -11,7 +11,7 @@ from auto_dev_loop.dev_loop import (
     run_agent_team,
     TeamResult,
 )
-from auto_dev_loop.models import Issue, AgentDef, Config, TelegramConfig, Defaults, ReviewVerdict
+from auto_dev_loop.models import VERDICT_TESTS_PASSING, Issue, AgentDef, Config, TelegramConfig, Defaults, ReviewVerdict
 
 
 def _issue():
@@ -117,3 +117,21 @@ async def test_dev_loop_tests_fail_no_review():
 
     assert result.cycles == 2
     assert result.diff == "fixed diff"
+
+
+@pytest.mark.asyncio
+async def test_substring_match_false_positive():
+    """Ensure TESTS_PASSING marker embedded in other text doesn't match."""
+    # Simulate agent output that mentions the marker in prose but didn't emit it on its own line
+    agent_output = f"Checked for {VERDICT_TESTS_PASSING} but tests actually failed."
+
+    with patch("auto_dev_loop.dev_loop.agent_query", return_value=agent_output):
+        with patch("auto_dev_loop.dev_loop.asyncio.create_subprocess_exec") as mock_proc:
+            mock_proc.return_value.communicate = AsyncMock(return_value=(b"diff", None))
+            result = await run_agent_team(
+                issue=_issue(), plan="plan", agents=_agents(),
+                worktree=Path("/tmp/wt"), config=_config(), cycle=1,
+            )
+
+    # Should NOT detect tests as passing — marker was not on its own line
+    assert result.tests_passing is False

@@ -17,6 +17,7 @@ from .models import (
     Config,
     Issue,
     ReviewVerdict,
+    fence_untrusted,
 )
 from .multi_model import multi_model_review
 from .pr import create_pr
@@ -63,8 +64,9 @@ class OrchestratorDispatcher(StageDispatcher):
         """Build a prompt from issue context plus prior stage outputs."""
         parts = [
             f"## Issue: {issue.repo} #{issue.number}",
-            f"**{issue.title}**",
-            f"\n{issue.body}",
+            f"**{fence_untrusted(issue.title, 'issue-title')}**",
+            "",
+            fence_untrusted(issue.body, "issue-body"),
         ]
 
         for ref, output in prior_outputs.items():
