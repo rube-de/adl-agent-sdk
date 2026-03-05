@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .agent_query import agent_query
-from .models import AgentDef, Config, ReviewVerdict
+from .models import AgentDef, Config, ReviewVerdict, VERDICT_APPROVED, VERDICT_NEEDS_REVISION
 from .review_parser import parse_review_verdict, synthesize_reviews
 
 log = logging.getLogger(__name__)
@@ -29,8 +29,8 @@ def build_review_prompt(plan: str, diff: str) -> str:
     return (
         f"## Implementation Plan\n{plan}\n\n"
         f"## Code Changes\n```diff\n{diff}\n```\n\n"
-        "Review the code changes against the plan. "
-        "End with APPROVED or NEEDS_REVISION."
+        f"Review the code changes against the plan. "
+        f"End with {VERDICT_APPROVED} or {VERDICT_NEEDS_REVISION}."
     )
 
 

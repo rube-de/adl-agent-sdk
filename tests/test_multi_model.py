@@ -38,6 +38,15 @@ def test_build_review_prompt():
     assert "diff --git" in prompt
 
 
+def test_build_review_prompt_uses_verdict_constants():
+    """Review prompt should reference the distinctive verdict markers, not bare strings."""
+    prompt = build_review_prompt("plan", "diff")
+    assert VERDICT_APPROVED in prompt
+    assert VERDICT_NEEDS_REVISION in prompt
+    # Bare "End with APPROVED" should not appear
+    assert "End with APPROVED or" not in prompt
+
+
 @pytest.mark.asyncio
 async def test_all_approved():
     async def mock_query(agent_def, prompt, worktree, config, **kw):
