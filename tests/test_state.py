@@ -44,14 +44,18 @@ async def test_update_state(db: StateStore):
 
 @pytest.mark.asyncio
 async def test_list_active_issues(db: StateStore):
-    await db.upsert_issue(repo="o/r", number=1, title="a", state="PLANNING")
-    await db.upsert_issue(repo="o/r", number=2, title="b", state="DONE")
-    await db.upsert_issue(repo="o/r", number=3, title="c", state="DEV_CYCLE_1")
+    await db.upsert_issue(repo="o/r", number=1, title="a", state="claimed")
+    await db.upsert_issue(repo="o/r", number=2, title="b", state="completed")
+    await db.upsert_issue(repo="o/r", number=3, title="c", state="planning")
+    await db.upsert_issue(repo="o/r", number=4, title="d", state="failed")
+    await db.upsert_issue(repo="o/r", number=5, title="e", state="escalated")
     active = await db.list_active_issues()
     numbers = [i["number"] for i in active]
     assert 1 in numbers
     assert 3 in numbers
-    assert 2 not in numbers
+    assert 2 not in numbers  # completed
+    assert 4 not in numbers  # failed
+    assert 5 not in numbers  # escalated
 
 
 @pytest.mark.asyncio

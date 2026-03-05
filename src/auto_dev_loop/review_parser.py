@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 
-from .models import ReviewVerdict
+from .models import VERDICT_APPROVED, VERDICT_NEEDS_REVISION, ReviewVerdict
 
 
 def parse_review_verdict(output: str) -> ReviewVerdict:
@@ -21,9 +21,9 @@ def parse_review_verdict(output: str) -> ReviewVerdict:
 
     # Check all non-empty lines bottom-up for markers
     for line in reversed(lines):
-        if line == "APPROVED":
+        if line == VERDICT_APPROVED:
             return ReviewVerdict(approved=True, feedback=None)
-        if line == "NEEDS_REVISION":
+        if line == VERDICT_NEEDS_REVISION:
             # Extract feedback section if present (last match, to pair
             # with the bottom-up verdict scan)
             matches = list(re.finditer(

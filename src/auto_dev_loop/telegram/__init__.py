@@ -161,8 +161,8 @@ class TelegramBot:
         except asyncio.TimeoutError:
             return HumanDecision(action="timeout")
         finally:
-            self._poller._callback_handlers.pop(handler_id, None)
-            self._poller._reply_handlers.pop(msg.message_id, None)
+            self._poller.remove_callback(handler_id)
+            self._poller.remove_reply_handler(msg.message_id)
 
     # --- Notifications ---
 

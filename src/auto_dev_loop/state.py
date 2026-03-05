@@ -108,7 +108,8 @@ class StateStore:
 
     async def list_active_issues(self) -> list[dict]:
         cursor = await self._db.execute(
-            "SELECT * FROM issues WHERE state NOT IN ('DONE', 'FAILED', 'ABANDONED')"
+            "SELECT * FROM issues WHERE state NOT IN (?, ?, ?)",
+            ("completed", "failed", "escalated"),
         )
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]

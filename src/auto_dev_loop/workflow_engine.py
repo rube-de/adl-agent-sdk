@@ -11,7 +11,14 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-from .models import Issue, ReviewVerdict, WorkflowResult
+from .models import (
+    APPROVED_MARKERS,
+    VERDICT_NEEDS_REVISION,
+    VERDICT_VETOED,
+    Issue,
+    ReviewVerdict,
+    WorkflowResult,
+)
 from .review_parser import parse_review_verdict
 from .workflow_conditions import CONDITIONS  # noqa: F401 — re-exported as public API
 from .workflow_loader import StageConfig, WorkflowConfig
@@ -93,14 +100,12 @@ def _parse_verdict(output: str, *, strict: bool = False) -> Verdict:
     lines = [line.strip() for line in output.strip().splitlines() if line.strip()]
 
     for line in reversed(lines):
-        if line in ("APPROVED", "PLAN_READY", "TESTS_PASSING",
-                     "IMPLEMENTATION_COMPLETE", "FIXES_APPLIED",
-                     "FEEDBACK_APPLIED"):
+        if line in APPROVED_MARKERS:
             return Verdict(status="approved")
-        if line == "NEEDS_REVISION":
+        if line == VERDICT_NEEDS_REVISION:
             rv = parse_review_verdict(output)
             return Verdict(status="needs_revision", feedback=rv.feedback)
-        if line == "VETOED":
+        if line == VERDICT_VETOED:
             return Verdict(status="vetoed", feedback=output)
 
     if strict:

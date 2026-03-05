@@ -10,7 +10,14 @@ from .agent_query import agent_query
 from .branch import build_branch_name  # re-exported as public API
 from .dev_loop import run_agent_team
 from .hooks import CommandGuard
-from .models import Config, Issue, ReviewVerdict
+from .models import (
+    VERDICT_APPROVED,
+    VERDICT_NEEDS_REVISION,
+    VERDICT_TESTS_PASSING,
+    Config,
+    Issue,
+    ReviewVerdict,
+)
 from .multi_model import multi_model_review
 from .pr import create_pr
 from .review_loop import review_loop
@@ -107,8 +114,8 @@ class OrchestratorDispatcher(StageDispatcher):
             guard=self._guard,
         )
         if team_result.tests_passing:
-            return f"{team_result.diff}\n\nTESTS_PASSING\nAPPROVED"
-        return f"{team_result.diff}\n\nNEEDS_REVISION"
+            return f"{team_result.diff}\n\n{VERDICT_TESTS_PASSING}\n{VERDICT_APPROVED}"
+        return f"{team_result.diff}\n\n{VERDICT_NEEDS_REVISION}"
 
     async def dispatch_multi_review(
         self,
@@ -119,8 +126,8 @@ class OrchestratorDispatcher(StageDispatcher):
         plan = prior_outputs.get("plan", "")
         dev_output = prior_outputs.get("dev", "")
         diff = (
-            dev_output.split("\n\nTESTS_PASSING")[0]
-            if "TESTS_PASSING" in dev_output
+            dev_output.split(f"\n\n{VERDICT_TESTS_PASSING}")[0]
+            if VERDICT_TESTS_PASSING in dev_output
             else dev_output
         )
         review = await multi_model_review(
@@ -131,8 +138,8 @@ class OrchestratorDispatcher(StageDispatcher):
             config=self._config,
         )
         if review.verdict.approved:
-            return "APPROVED"
-        return f"## Feedback\n{review.verdict.feedback}\n\nNEEDS_REVISION"
+            return VERDICT_APPROVED
+        return f"## Feedback\n{review.verdict.feedback}\n\n{VERDICT_NEEDS_REVISION}"
 
     async def dispatch_infrastructure(
         self,
@@ -143,7 +150,7 @@ class OrchestratorDispatcher(StageDispatcher):
         if stage.ref == "create_pr":
             self.pr_number = await create_pr(issue, self._worktree)
             log.info("PR #%d created", self.pr_number)
-            return f"PR #{self.pr_number} created\n\nAPPROVED"
+            return f"PR #{self.pr_number} created\n\n{VERDICT_APPROVED}"
 
         if stage.ref == "pr_review":
             if self.pr_number is None:
@@ -156,7 +163,7 @@ class OrchestratorDispatcher(StageDispatcher):
                 guard=self._guard,
             )
             log.info("Review completed after %d cycles", result.cycles)
-            return f"Review completed ({result.cycles} cycles)\n\nAPPROVED"
+            return f"Review completed ({result.cycles} cycles)\n\n{VERDICT_APPROVED}"
 
         raise ValueError(f"Unknown infrastructure stage: {stage.ref}")
 
