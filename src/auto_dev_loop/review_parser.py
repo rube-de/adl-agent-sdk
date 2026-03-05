@@ -27,7 +27,7 @@ def parse_review_verdict(output: str) -> ReviewVerdict:
             # Extract feedback section if present (last match, to pair
             # with the bottom-up verdict scan)
             matches = list(re.finditer(
-                r"## Feedback\s*\n(.*?)(?=\nNEEDS_REVISION)",
+                rf"## Feedback\s*\n(.*?)(?=\n{re.escape(VERDICT_NEEDS_REVISION)})",
                 output,
                 re.DOTALL,
             ))

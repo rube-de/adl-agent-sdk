@@ -125,11 +125,7 @@ class OrchestratorDispatcher(StageDispatcher):
     ) -> str:
         plan = prior_outputs.get("plan", "")
         dev_output = prior_outputs.get("dev", "")
-        diff = (
-            dev_output.split(f"\n\n{VERDICT_TESTS_PASSING}")[0]
-            if VERDICT_TESTS_PASSING in dev_output
-            else dev_output
-        )
+        diff = dev_output.partition(f"\n\n{VERDICT_TESTS_PASSING}")[0]
         review = await multi_model_review(
             worktree=self._worktree,
             plan=plan,

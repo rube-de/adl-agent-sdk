@@ -15,6 +15,9 @@ VERDICT_IMPLEMENTATION_COMPLETE = "IMPLEMENTATION_COMPLETE"
 VERDICT_FIXES_APPLIED = "FIXES_APPLIED"
 VERDICT_FEEDBACK_APPLIED = "FEEDBACK_APPLIED"
 
+# Issue states that represent terminal (finished) processing.
+TERMINAL_ISSUE_STATES = frozenset({"completed", "failed", "escalated"})
+
 # Set of markers that the engine treats as "approved" (stage passes).
 APPROVED_MARKERS = frozenset({
     VERDICT_APPROVED,
