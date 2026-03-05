@@ -22,7 +22,6 @@ class TelegramPoller:
     def __init__(self, bot_api):
         self._api = bot_api
         self._offset: int = 0
-        self._seen: set[int] = set()
         # Keyed by unique handler_id; value is (prefix, handler).
         self._callback_handlers: dict[str, tuple[str, CallbackHandler]] = {}
         self._reply_handlers: dict[int, ReplyHandler] = {}
@@ -39,6 +38,14 @@ class TelegramPoller:
         """Register one-shot handler for replies to a specific message."""
         self._reply_handlers[message_id] = handler
 
+    def remove_callback(self, handler_id: str) -> None:
+        """Unregister a callback handler by its handler_id."""
+        self._callback_handlers.pop(handler_id, None)
+
+    def remove_reply_handler(self, message_id: int) -> None:
+        """Unregister a reply handler by message_id."""
+        self._reply_handlers.pop(message_id, None)
+
     async def poll_loop(self) -> None:
         """Long-poll Telegram for updates. Runs forever."""
         while True:
@@ -53,12 +60,6 @@ class TelegramPoller:
 
             for update in updates:
                 self._offset = update.update_id + 1
-
-                if update.update_id in self._seen:
-                    continue
-                self._seen.add(update.update_id)
-                if len(self._seen) > 10_000:
-                    self._seen = set(sorted(self._seen)[-5_000:])
 
                 if update.callback_query:
                     await self._route_callback(update.callback_query)

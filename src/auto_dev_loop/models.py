@@ -4,6 +4,30 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+# Verdict markers emitted by agents and parsed by the workflow engine.
+# Keep in sync: dispatcher produces these, workflow_engine/review_parser consume them.
+VERDICT_APPROVED = "APPROVED"
+VERDICT_NEEDS_REVISION = "NEEDS_REVISION"
+VERDICT_VETOED = "VETOED"
+VERDICT_PLAN_READY = "PLAN_READY"
+VERDICT_TESTS_PASSING = "TESTS_PASSING"
+VERDICT_IMPLEMENTATION_COMPLETE = "IMPLEMENTATION_COMPLETE"
+VERDICT_FIXES_APPLIED = "FIXES_APPLIED"
+VERDICT_FEEDBACK_APPLIED = "FEEDBACK_APPLIED"
+
+# Issue states that represent terminal (finished) processing.
+TERMINAL_ISSUE_STATES = frozenset({"completed", "failed", "escalated"})
+
+# Set of markers that the engine treats as "approved" (stage passes).
+APPROVED_MARKERS = frozenset({
+    VERDICT_APPROVED,
+    VERDICT_PLAN_READY,
+    VERDICT_TESTS_PASSING,
+    VERDICT_IMPLEMENTATION_COMPLETE,
+    VERDICT_FIXES_APPLIED,
+    VERDICT_FEEDBACK_APPLIED,
+})
+
 
 @dataclass
 class AgentDef:
@@ -80,7 +104,6 @@ class Defaults:
     max_review_cycles: int = 5
     review_backoff: list[int] = field(default_factory=lambda: [120, 300, 900, 1800, 3600])
     worker_timeout: int = 3600
-    human_timeout: int = 3600
     external_review_timeout: int = 300
     circuit_breaker_failures: int = 3
     plan_reviewers: list[str] = field(default_factory=list)

@@ -157,24 +157,10 @@ async def run_poll_cycle(
 
             if once:
                 # --once: process inline, single issue, then return
-                store = state.store
-                logger = _make_issue_logger(issue)
                 try:
-                    if store:
-                        await store.upsert_issue(
-                            issue.repo, issue.number, issue.title,
-                            IssueState.CLAIMED.value,
-                            project_item_id=issue.project_item_id,
-                        )
-                    result = await process_issue(
-                        issue, config, repo_path=Path(repo_cfg.path),
-                        store=store, issue_logger=logger,
+                    await _process_issue_task(
+                        issue, config, Path(repo_cfg.path), key, state,
                     )
-                    log.info("Completed %s: %s", key, result.state)
-                    if store:
-                        await store.update_state(issue.id, result.state.value)
-                except Exception:
-                    log.exception("Failed processing %s", key)
                 finally:
                     state.active_issues.discard(key)
                 return

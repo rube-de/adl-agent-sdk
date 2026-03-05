@@ -75,16 +75,14 @@ def load_config(path: Path) -> Config:
     repos = []
     for i, r in enumerate(raw.get("repos", [])):
         try:
-            repos.append(RepoConfig(
-                path=r["path"],
-                project_number=r["project_number"],
-                columns=r.get("columns", {
-                    "source": "Ready for Dev",
-                    "in_progress": "In Progress",
-                    "done": "Done",
-                }),
-                owner=r.get("owner"),
-            ))
+            kwargs = {
+                "path": r["path"],
+                "project_number": r["project_number"],
+                "owner": r.get("owner"),
+            }
+            if "columns" in r:
+                kwargs["columns"] = r["columns"]
+            repos.append(RepoConfig(**kwargs))
         except KeyError as e:
             raise ConfigError(f"Missing required key in repos[{i}]: {e}") from None
 

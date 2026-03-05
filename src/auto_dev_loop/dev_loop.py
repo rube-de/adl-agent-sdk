@@ -10,7 +10,7 @@ from pathlib import Path
 from .agent_loader import load_agents
 from .agent_query import agent_query
 from .hooks import CommandGuard
-from .models import Config, DevResult, Issue
+from .models import VERDICT_TESTS_PASSING, Config, DevResult, Issue
 from .multi_model import multi_model_review
 
 log = logging.getLogger(__name__)
@@ -54,7 +54,7 @@ async def run_agent_team(
         guard=guard,
     )
 
-    tests_passing = "TESTS_PASSING" in output
+    tests_passing = VERDICT_TESTS_PASSING in output
 
     proc = await asyncio.create_subprocess_exec(
         "git", "diff", "HEAD",

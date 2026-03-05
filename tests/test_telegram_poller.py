@@ -90,7 +90,7 @@ def test_removing_one_handler_preserves_others():
     poller.on_callback("esc:1:plan", "adl:", handler_a)
     poller.on_callback("esc:2:plan", "adl:", handler_b)
 
-    poller._callback_handlers.pop("esc:1:plan")
+    poller.remove_callback("esc:1:plan")
 
     assert "esc:1:plan" not in poller._callback_handlers
     assert "esc:2:plan" in poller._callback_handlers

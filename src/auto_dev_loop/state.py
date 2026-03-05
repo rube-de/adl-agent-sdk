@@ -7,6 +7,8 @@ from pathlib import Path
 
 import aiosqlite
 
+from .models import TERMINAL_ISSUE_STATES
+
 
 class StateStore:
     def __init__(self, db_path: Path):
@@ -107,8 +109,10 @@ class StateStore:
         await self._db.commit()
 
     async def list_active_issues(self) -> list[dict]:
+        placeholders = ", ".join("?" for _ in TERMINAL_ISSUE_STATES)
         cursor = await self._db.execute(
-            "SELECT * FROM issues WHERE state NOT IN ('DONE', 'FAILED', 'ABANDONED')"
+            f"SELECT * FROM issues WHERE state NOT IN ({placeholders})",
+            tuple(TERMINAL_ISSUE_STATES),
         )
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]
@@ -167,9 +171,10 @@ class StateStore:
 
     async def list_terminal_issue_keys(self) -> set[str]:
         """Return ``repo#number`` keys for issues in terminal states."""
+        placeholders = ", ".join("?" for _ in TERMINAL_ISSUE_STATES)
         cursor = await self._db.execute(
-            "SELECT repo, number FROM issues WHERE state IN (?, ?, ?)",
-            ("completed", "failed", "escalated"),
+            f"SELECT repo, number FROM issues WHERE state IN ({placeholders})",
+            tuple(TERMINAL_ISSUE_STATES),
         )
         rows = await cursor.fetchall()
         return {f"{r['repo']}#{r['number']}" for r in rows}
