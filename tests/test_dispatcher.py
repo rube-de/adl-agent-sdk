@@ -8,6 +8,7 @@ import pytest
 from auto_dev_loop.dispatcher import OrchestratorDispatcher, build_branch_name
 from auto_dev_loop.models import (
     AgentDef, Config, Defaults, Issue, TelegramConfig, WorkflowSelectionConfig,
+    VERDICT_APPROVED,
 )
 from auto_dev_loop.workflow_loader import StageConfig
 
@@ -137,7 +138,7 @@ async def test_dispatch_single_includes_prior_outputs_in_prompt():
     stage = StageConfig(ref="plan_review", agent="plan_reviewer")
     prior = {"plan": "## The Plan\nDo stuff"}
 
-    with patch("auto_dev_loop.dispatcher.agent_query", new_callable=AsyncMock, return_value="APPROVED") as mock_aq:
+    with patch("auto_dev_loop.dispatcher.agent_query", new_callable=AsyncMock, return_value=VERDICT_APPROVED) as mock_aq:
         await d.dispatch_single(stage, _issue(), prior)
 
     # Extract the prompt from the call
@@ -158,7 +159,7 @@ async def test_dispatch_infrastructure_create_pr():
         result = await d.dispatch_infrastructure(stage, _issue(), prior)
 
     assert d.pr_number == 99
-    assert "APPROVED" in result
+    assert VERDICT_APPROVED in result
 
 
 @pytest.mark.asyncio
@@ -175,7 +176,7 @@ async def test_dispatch_infrastructure_pr_review():
     with patch("auto_dev_loop.dispatcher.review_loop", new_callable=AsyncMock, return_value=mock_result):
         result = await d.dispatch_infrastructure(stage, _issue(), prior)
 
-    assert "APPROVED" in result
+    assert VERDICT_APPROVED in result
 
 
 # --- escalate_to_human ---

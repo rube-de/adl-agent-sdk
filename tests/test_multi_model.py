@@ -11,7 +11,7 @@ from auto_dev_loop.multi_model import (
     build_review_prompt,
     AllReviewersFailedError,
 )
-from auto_dev_loop.models import AgentDef, Config, TelegramConfig, Defaults
+from auto_dev_loop.models import AgentDef, Config, TelegramConfig, Defaults, VERDICT_APPROVED, VERDICT_NEEDS_REVISION
 
 
 def _config():
@@ -41,10 +41,10 @@ def test_build_review_prompt():
 @pytest.mark.asyncio
 async def test_all_approved():
     async def mock_query(agent_def, prompt, worktree, config, **kw):
-        return "Looks good.\n\nAPPROVED"
+        return f"Looks good.\n\n{VERDICT_APPROVED}"
 
     async def mock_external(cmd, prompt, worktree, timeout):
-        return "Fine.\n\nAPPROVED"
+        return f"Fine.\n\n{VERDICT_APPROVED}"
 
     with patch("auto_dev_loop.multi_model.agent_query", side_effect=mock_query):
         with patch("auto_dev_loop.multi_model.run_external_with_timeout", side_effect=mock_external):
@@ -62,10 +62,10 @@ async def test_all_approved():
 @pytest.mark.asyncio
 async def test_one_rejection_means_rejected():
     async def mock_query(agent_def, prompt, worktree, config, **kw):
-        return "APPROVED"
+        return VERDICT_APPROVED
 
     async def mock_external(cmd, prompt, worktree, timeout):
-        return "## Feedback\nMissing tests\n\nNEEDS_REVISION"
+        return f"## Feedback\nMissing tests\n\n{VERDICT_NEEDS_REVISION}"
 
     with patch("auto_dev_loop.multi_model.agent_query", side_effect=mock_query):
         with patch("auto_dev_loop.multi_model.run_external_with_timeout", side_effect=mock_external):
@@ -84,7 +84,7 @@ async def test_one_rejection_means_rejected():
 @pytest.mark.asyncio
 async def test_external_timeout_graceful():
     async def mock_query(agent_def, prompt, worktree, config, **kw):
-        return "APPROVED"
+        return VERDICT_APPROVED
 
     async def mock_external(cmd, prompt, worktree, timeout):
         raise asyncio.TimeoutError()

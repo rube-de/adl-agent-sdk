@@ -9,6 +9,7 @@ from auto_dev_loop.dispatcher import OrchestratorDispatcher
 from auto_dev_loop.models import (
     AgentDef, Config, Defaults, Issue,
     TelegramConfig, WorkflowSelectionConfig,
+    VERDICT_APPROVED, VERDICT_NEEDS_REVISION,
 )
 from auto_dev_loop.workflow_engine import execute_workflow
 from auto_dev_loop.workflow_loader import StageConfig, WorkflowConfig
@@ -58,10 +59,10 @@ async def test_mini_workflow_happy_path():
     async def mock_agent_query(agent_def, prompt, worktree, config, **kw):
         call_log.append(agent_def.name)
         if agent_def.name == "architect":
-            return "## Plan\nDo the thing\n\nAPPROVED"
+            return f"## Plan\nDo the thing\n\n{VERDICT_APPROVED}"
         if agent_def.name == "plan_reviewer":
-            return "APPROVED"
-        return "APPROVED"
+            return VERDICT_APPROVED
+        return VERDICT_APPROVED
 
     mock_review_result = MagicMock()
     mock_review_result.cycles = 0
@@ -89,12 +90,12 @@ async def test_mini_workflow_with_loop_target():
     async def mock_agent_query(agent_def, prompt, worktree, config, **kw):
         call_log.append(agent_def.name)
         if agent_def.name == "architect":
-            return "## Plan\nDo the thing\n\nAPPROVED"
+            return f"## Plan\nDo the thing\n\n{VERDICT_APPROVED}"
         if agent_def.name == "plan_reviewer":
             if call_log.count("plan_reviewer") == 1:
-                return "## Feedback\nAdd tests\n\nNEEDS_REVISION"
-            return "APPROVED"
-        return "APPROVED"
+                return f"## Feedback\nAdd tests\n\n{VERDICT_NEEDS_REVISION}"
+            return VERDICT_APPROVED
+        return VERDICT_APPROVED
 
     mock_review_result = MagicMock(cycles=0, merged=True)
 

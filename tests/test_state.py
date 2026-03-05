@@ -2,6 +2,7 @@
 
 import pytest
 
+from auto_dev_loop.models import VERDICT_APPROVED
 from auto_dev_loop.state import StateStore
 
 
@@ -64,7 +65,7 @@ async def test_store_review_iteration(db: StateStore):
     issue = await db.get_issue("o/r", 1)
     await db.store_review_iteration(
         issue_id=issue["id"], dev_cycle=1, iteration=1,
-        worker_output="diff", reviewer_output="APPROVED",
+        worker_output="diff", reviewer_output=VERDICT_APPROVED,
         approved=True, reviewer_models=["claude"],
     )
     iters = await db.get_review_iterations(issue["id"])

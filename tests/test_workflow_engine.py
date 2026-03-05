@@ -8,7 +8,10 @@ from auto_dev_loop.workflow_engine import (
     StageDispatcher,
     _parse_verdict,
 )
-from auto_dev_loop.models import Issue, ReviewVerdict, WorkflowResult, has_verdict_line, VERDICT_TESTS_PASSING
+from auto_dev_loop.models import (
+    Issue, ReviewVerdict, WorkflowResult, has_verdict_line,
+    VERDICT_APPROVED, VERDICT_NEEDS_REVISION, VERDICT_VETOED, VERDICT_TESTS_PASSING,
+)
 from auto_dev_loop.workflow_loader import WorkflowConfig, StageConfig
 
 
@@ -29,16 +32,16 @@ class FakeDispatcher(StageDispatcher):
         self._results = results  # stage_ref -> output text
 
     async def dispatch_single(self, stage, issue, prior_outputs):
-        return self._results.get(stage.ref, "APPROVED")
+        return self._results.get(stage.ref, VERDICT_APPROVED)
 
     async def dispatch_team(self, stage, issue, prior_outputs):
-        return self._results.get(stage.ref, "APPROVED")
+        return self._results.get(stage.ref, VERDICT_APPROVED)
 
     async def dispatch_multi_review(self, stage, issue, prior_outputs):
-        return self._results.get(stage.ref, "APPROVED")
+        return self._results.get(stage.ref, VERDICT_APPROVED)
 
     async def dispatch_infrastructure(self, stage, issue, prior_outputs):
-        return self._results.get(stage.ref, "APPROVED")
+        return self._results.get(stage.ref, VERDICT_APPROVED)
 
     async def escalate_to_human(self, issue, stage, verdict, reason):
         return "approve"
@@ -84,7 +87,7 @@ async def test_simple_workflow_completes():
         StageConfig(ref="plan", agent="architect"),
         StageConfig(ref="review", agent="reviewer"),
     )
-    dispatcher = FakeDispatcher({"plan": "APPROVED", "review": "APPROVED"})
+    dispatcher = FakeDispatcher({"plan": VERDICT_APPROVED, "review": VERDICT_APPROVED})
     result = await execute_workflow(wf, _issue(), dispatcher)
     assert result.status == "completed"
 
@@ -95,7 +98,7 @@ async def test_optional_stage_skipped_when_condition_false():
         StageConfig(ref="research", agent="researcher", optional=True, condition="unknowns_exist"),
         StageConfig(ref="plan", agent="architect"),
     )
-    dispatcher = FakeDispatcher({"plan": "APPROVED"})
+    dispatcher = FakeDispatcher({"plan": VERDICT_APPROVED})
     result = await execute_workflow(wf, _issue(body="Fix typo"), dispatcher)
     assert result.status == "completed"
 
@@ -106,7 +109,7 @@ async def test_optional_stage_runs_when_condition_true():
         StageConfig(ref="research", agent="researcher", optional=True, condition="unknowns_exist"),
         StageConfig(ref="plan", agent="architect"),
     )
-    dispatcher = FakeDispatcher({"research": "APPROVED", "plan": "APPROVED"})
+    dispatcher = FakeDispatcher({"research": VERDICT_APPROVED, "plan": VERDICT_APPROVED})
     result = await execute_workflow(wf, _issue(body="We need to investigate this"), dispatcher)
     assert result.status == "completed"
 
@@ -119,8 +122,8 @@ async def test_rejection_with_loop_target():
         async def dispatch_single(self, stage, issue, prior_outputs):
             call_count[stage.ref] = call_count.get(stage.ref, 0) + 1
             if stage.ref == "review" and call_count["review"] == 1:
-                return "## Feedback\nFix tests\n\nNEEDS_REVISION"
-            return "APPROVED"
+                return f"## Feedback\nFix tests\n\n{VERDICT_NEEDS_REVISION}"
+            return VERDICT_APPROVED
 
     wf = _workflow(
         StageConfig(ref="plan", agent="architect"),
@@ -136,8 +139,8 @@ async def test_max_iterations_escalates():
     class AlwaysRejectDispatcher(FakeDispatcher):
         async def dispatch_single(self, stage, issue, prior_outputs):
             if stage.ref == "review":
-                return "NEEDS_REVISION"
-            return "APPROVED"
+                return VERDICT_NEEDS_REVISION
+            return VERDICT_APPROVED
 
         async def escalate_to_human(self, issue, stage, verdict, reason):
             return "timeout"
@@ -156,8 +159,8 @@ async def test_veto_escalates():
     class VetoDispatcher(FakeDispatcher):
         async def dispatch_single(self, stage, issue, prior_outputs):
             if stage.ref == "security":
-                return "VETOED"
-            return "APPROVED"
+                return VERDICT_VETOED
+            return VERDICT_APPROVED
 
         async def escalate_to_human(self, issue, stage, verdict, reason):
             return "reject"
@@ -186,7 +189,7 @@ async def test_team_stage_dispatches():
             team={"tester": {"agent": "tester", "model_role": "smol"}},
         ),
     )
-    dispatcher = FakeDispatcher({"dev": "APPROVED"})
+    dispatcher = FakeDispatcher({"dev": VERDICT_APPROVED})
     result = await execute_workflow(wf, _issue(), dispatcher)
     assert result.status == "completed"
 
@@ -200,8 +203,8 @@ async def test_loop_target_reruns_target_stage():
         async def dispatch_single(self, stage, issue, prior_outputs):
             call_log.append(stage.ref)
             if stage.ref == "review" and call_log.count("review") == 1:
-                return "## Feedback\nFix the plan\n\nNEEDS_REVISION"
-            return "APPROVED"
+                return f"## Feedback\nFix the plan\n\n{VERDICT_NEEDS_REVISION}"
+            return VERDICT_APPROVED
 
     wf = _workflow(
         StageConfig(ref="plan", agent="architect"),
@@ -221,7 +224,7 @@ async def test_infrastructure_stage_dispatches():
     class InfraDispatcher(FakeDispatcher):
         async def dispatch_infrastructure(self, stage, issue, prior_outputs):
             dispatched.append(stage.ref)
-            return "APPROVED"
+            return VERDICT_APPROVED
 
     wf = _workflow(
         StageConfig(ref="dev", agent="developer"),
@@ -246,8 +249,8 @@ async def test_loopback_does_not_count_target_stage():
         async def dispatch_single(self, stage, issue, prior_outputs):
             call_count[stage.ref] = call_count.get(stage.ref, 0) + 1
             if stage.ref == "review":
-                return "## Feedback\nBad plan\n\nNEEDS_REVISION"
-            return "APPROVED"
+                return f"## Feedback\nBad plan\n\n{VERDICT_NEEDS_REVISION}"
+            return VERDICT_APPROVED
 
         async def escalate_to_human(self, issue, stage, verdict, reason):
             escalated_at["stage"] = stage.ref
@@ -275,7 +278,7 @@ async def test_internal_keys_prefixed_with_underscore():
     class SpyDispatcher(FakeDispatcher):
         async def dispatch_single(self, stage, issue, prior_outputs):
             seen_keys.append(list(prior_outputs.keys()))
-            return "APPROVED"
+            return VERDICT_APPROVED
 
     wf = _workflow(
         StageConfig(ref="plan", agent="architect"),
@@ -296,7 +299,7 @@ async def test_internal_keys_prefixed_with_underscore():
 def test_parse_verdict_approved_beyond_5_lines():
     """Verdict keyword beyond last 5 lines should still be found."""
     verbose_lines = "\n".join(f"Detail line {i}" for i in range(10))
-    output = f"APPROVED\n{verbose_lines}"
+    output = f"{VERDICT_APPROVED}\n{verbose_lines}"
     verdict = _parse_verdict(output)
     assert verdict.status == "approved"
 
@@ -304,7 +307,7 @@ def test_parse_verdict_approved_beyond_5_lines():
 def test_parse_verdict_needs_revision_beyond_5_lines():
     """NEEDS_REVISION beyond last 5 lines should still be found."""
     verbose_lines = "\n".join(f"Detail line {i}" for i in range(10))
-    output = f"## Feedback\nFix the bug\n\nNEEDS_REVISION\n{verbose_lines}"
+    output = f"## Feedback\nFix the bug\n\n{VERDICT_NEEDS_REVISION}\n{verbose_lines}"
     verdict = _parse_verdict(output)
     assert verdict.status == "needs_revision"
 
