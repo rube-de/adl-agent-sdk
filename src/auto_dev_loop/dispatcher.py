@@ -64,7 +64,7 @@ class OrchestratorDispatcher(StageDispatcher):
         """Build a prompt from issue context plus prior stage outputs."""
         parts = [
             f"## Issue: {issue.repo} #{issue.number}",
-            f"**{issue.title}**",
+            f"**{fence_untrusted(issue.title, 'issue-title')}**",
             "",
             fence_untrusted(issue.body, "issue-body"),
         ]

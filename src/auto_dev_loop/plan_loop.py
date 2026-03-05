@@ -24,7 +24,7 @@ def build_architect_prompt(
     """Build the prompt sent to the architect agent."""
     parts = [
         f"## Issue: {issue.repo} #{issue.number}",
-        f"**{issue.title}**",
+        f"**{fence_untrusted(issue.title, 'issue-title')}**",
         "",
         fence_untrusted(issue.body, "issue-body"),
     ]

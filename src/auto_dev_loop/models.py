@@ -40,7 +40,10 @@ def fence_untrusted(content: str, label: str) -> str:
     Helps LLM agents distinguish trusted instructions from user-provided
     data that may contain prompt injection payloads.
     """
-    return f'<untrusted source="{label}">\n{content}\n</untrusted>'
+    import re
+    safe_label = re.sub(r'[^a-zA-Z0-9_-]', '_', label)
+    escaped = content.replace("</untrusted>", "&lt;/untrusted&gt;")
+    return f'<untrusted source="{safe_label}">\n{escaped}\n</untrusted>'
 
 
 @dataclass

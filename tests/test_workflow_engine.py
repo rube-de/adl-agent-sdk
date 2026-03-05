@@ -340,8 +340,6 @@ def test_verdict_markers_have_distinctive_format():
     for marker in all_markers:
         assert marker.startswith("<<<VERDICT:"), f"{marker} missing prefix"
         assert marker.endswith(">>>"), f"{marker} missing suffix"
-    for marker in APPROVED_MARKERS:
-        assert marker.startswith("<<<VERDICT:"), f"{marker} in APPROVED_MARKERS missing prefix"
 
 
 def test_has_verdict_line_exact_match():

@@ -41,7 +41,7 @@ async def run_agent_team(
     """
     orchestrator_prompt = (
         f"## Issue: {issue.repo} #{issue.number}\n"
-        f"**{issue.title}**\n\n"
+        f"**{fence_untrusted(issue.title, 'issue-title')}**\n\n"
         f"{fence_untrusted(issue.body, 'issue-body')}\n\n"
         f"## Plan\n{plan}\n\n"
         "Implement the plan. Run tests after making changes."
