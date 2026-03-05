@@ -29,6 +29,11 @@ APPROVED_MARKERS = frozenset({
 })
 
 
+def has_verdict_line(output: str, marker: str) -> bool:
+    """Check if a verdict marker appears on its own line in output."""
+    return any(line.strip() == marker for line in output.splitlines())
+
+
 @dataclass
 class AgentDef:
     name: str

@@ -8,7 +8,7 @@ from auto_dev_loop.workflow_engine import (
     StageDispatcher,
     _parse_verdict,
 )
-from auto_dev_loop.models import Issue, ReviewVerdict, WorkflowResult
+from auto_dev_loop.models import Issue, ReviewVerdict, WorkflowResult, has_verdict_line, VERDICT_TESTS_PASSING
 from auto_dev_loop.workflow_loader import WorkflowConfig, StageConfig
 
 
@@ -320,3 +320,23 @@ def test_parse_verdict_nonstrict_no_marker():
     """Non-strict mode with no marker should default to approved."""
     verdict = _parse_verdict("Some output with no verdict keyword", strict=False)
     assert verdict.status == "approved"
+
+
+# --- has_verdict_line tests ---
+
+def test_has_verdict_line_exact_match():
+    output = f"Some output\n{VERDICT_TESTS_PASSING}\nMore output"
+    assert has_verdict_line(output, VERDICT_TESTS_PASSING) is True
+
+def test_has_verdict_line_no_match():
+    output = "Some output with no markers"
+    assert has_verdict_line(output, VERDICT_TESTS_PASSING) is False
+
+def test_has_verdict_line_substring_not_matched():
+    """Substring containing the marker should NOT match."""
+    output = f"The status is {VERDICT_TESTS_PASSING} now"
+    assert has_verdict_line(output, VERDICT_TESTS_PASSING) is False
+
+def test_has_verdict_line_with_whitespace():
+    output = f"  {VERDICT_TESTS_PASSING}  \n"
+    assert has_verdict_line(output, VERDICT_TESTS_PASSING) is True
