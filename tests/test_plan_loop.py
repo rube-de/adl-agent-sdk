@@ -41,6 +41,13 @@ def test_build_architect_prompt_initial():
     assert "Login crashes" in prompt
 
 
+def test_build_architect_prompt_fences_issue_body():
+    """Issue body should be wrapped in untrusted content markers."""
+    prompt = build_architect_prompt(_issue(), plan=None, feedback=None)
+    assert "<untrusted" in prompt
+    assert "</untrusted>" in prompt
+
+
 def test_build_architect_prompt_with_feedback():
     prompt = build_architect_prompt(_issue(), plan="old plan", feedback="needs tests")
     assert "needs tests" in prompt

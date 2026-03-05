@@ -17,6 +17,7 @@ from .models import (
     Config,
     Issue,
     ReviewVerdict,
+    fence_untrusted,
 )
 from .multi_model import multi_model_review
 from .pr import create_pr
@@ -64,7 +65,8 @@ class OrchestratorDispatcher(StageDispatcher):
         parts = [
             f"## Issue: {issue.repo} #{issue.number}",
             f"**{issue.title}**",
-            f"\n{issue.body}",
+            "",
+            fence_untrusted(issue.body, "issue-body"),
         ]
 
         for ref, output in prior_outputs.items():

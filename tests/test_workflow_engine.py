@@ -9,7 +9,7 @@ from auto_dev_loop.workflow_engine import (
     _parse_verdict,
 )
 from auto_dev_loop.models import (
-    Issue, ReviewVerdict, WorkflowResult, has_verdict_line,
+    Issue, ReviewVerdict, WorkflowResult, has_verdict_line, fence_untrusted,
     VERDICT_APPROVED, VERDICT_NEEDS_REVISION, VERDICT_VETOED, VERDICT_TESTS_PASSING,
     VERDICT_PLAN_READY, VERDICT_IMPLEMENTATION_COMPLETE, VERDICT_FIXES_APPLIED,
     VERDICT_FEEDBACK_APPLIED, APPROVED_MARKERS,
@@ -360,3 +360,17 @@ def test_has_verdict_line_substring_not_matched():
 def test_has_verdict_line_with_whitespace():
     output = f"  {VERDICT_TESTS_PASSING}  \n"
     assert has_verdict_line(output, VERDICT_TESTS_PASSING) is True
+
+
+# --- fence_untrusted tests ---
+
+def test_fence_untrusted_wraps_content():
+    result = fence_untrusted("user input here", "issue-body")
+    assert '<untrusted source="issue-body">' in result
+    assert "user input here" in result
+    assert "</untrusted>" in result
+
+
+def test_fence_untrusted_label():
+    result = fence_untrusted("content", "custom-label")
+    assert 'source="custom-label"' in result

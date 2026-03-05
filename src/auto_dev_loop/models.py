@@ -34,6 +34,15 @@ def has_verdict_line(output: str, marker: str) -> bool:
     return any(line.strip() == marker for line in output.splitlines())
 
 
+def fence_untrusted(content: str, label: str) -> str:
+    """Wrap untrusted content with XML boundary markers.
+
+    Helps LLM agents distinguish trusted instructions from user-provided
+    data that may contain prompt injection payloads.
+    """
+    return f'<untrusted source="{label}">\n{content}\n</untrusted>'
+
+
 @dataclass
 class AgentDef:
     name: str

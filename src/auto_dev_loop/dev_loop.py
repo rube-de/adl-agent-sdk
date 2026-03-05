@@ -10,7 +10,7 @@ from pathlib import Path
 from .agent_loader import load_agents
 from .agent_query import agent_query
 from .hooks import CommandGuard
-from .models import VERDICT_TESTS_PASSING, Config, DevResult, Issue, has_verdict_line
+from .models import VERDICT_TESTS_PASSING, Config, DevResult, Issue, fence_untrusted, has_verdict_line
 from .multi_model import multi_model_review
 
 log = logging.getLogger(__name__)
@@ -41,7 +41,8 @@ async def run_agent_team(
     """
     orchestrator_prompt = (
         f"## Issue: {issue.repo} #{issue.number}\n"
-        f"**{issue.title}**\n\n{issue.body}\n\n"
+        f"**{issue.title}**\n\n"
+        f"{fence_untrusted(issue.body, 'issue-body')}\n\n"
         f"## Plan\n{plan}\n\n"
         "Implement the plan. Run tests after making changes."
     )
