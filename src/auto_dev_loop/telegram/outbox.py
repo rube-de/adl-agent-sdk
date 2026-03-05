@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass, field
 from enum import IntEnum
 
-from .models import RetryAfter, BotApiError
+from .models import RetryAfter
 
 log = logging.getLogger(__name__)
 
@@ -129,8 +129,8 @@ class TelegramOutbox:
                     if item.message_key:
                         self._pending_edits[item.message_key] = item
                     self._schedule_requeue(item, e.retry_after)
-                except (BotApiError, Exception) as e:
-                    log.warning(f"Outbox item failed: {e}")
+                except Exception as e:
+                    log.warning("Outbox item failed: %s", e)
                     if item.future and not item.future.done():
                         item.future.set_exception(e)
         finally:
