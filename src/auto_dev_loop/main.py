@@ -30,6 +30,7 @@ class DaemonState:
     tasks: dict[str, asyncio.Task] = field(default_factory=dict)
     completed_keys: set[str] = field(default_factory=set)
     store: StateStore | None = None
+    shutdown_event: asyncio.Event | None = None
 
 
 def issue_key(issue: Issue) -> str:
@@ -113,15 +114,23 @@ async def _process_issue_task(
 
 async def run_poll_cycle(
     config: Config, state: DaemonState, *, once: bool = False,
+    shutdown_event: asyncio.Event | None = None,
 ) -> None:
     """Run one poll cycle across all configured repos.
 
     When *once* is True, process at most one issue inline and return.
     Otherwise, spawn concurrent tasks gated by max_concurrent.
+    If *shutdown_event* is provided (or set on *state*), the cycle returns early
+    when the event is set, preventing new task spawns.
     """
+    shutdown_event = shutdown_event or state.shutdown_event
     max_concurrent = 1 if once else config.defaults.max_concurrent
 
     for repo_cfg in config.repos:
+        if shutdown_event is not None and shutdown_event.is_set():
+            log.info("Shutdown requested — skipping remaining repos")
+            return
+
         if not isinstance(repo_cfg, RepoConfig):
             continue
 
@@ -171,6 +180,11 @@ async def run_poll_cycle(
                 return
 
             # Normal mode: spawn a concurrent task
+            if shutdown_event is not None and shutdown_event.is_set():
+                state.active_issues.discard(key)
+                log.info("Shutdown requested — not spawning task for %s", key)
+                break
+
             task = asyncio.create_task(
                 _process_issue_task(issue, config, Path(repo_cfg.path), key, state),
                 name=f"adl:{key}",
@@ -179,6 +193,11 @@ async def run_poll_cycle(
                 functools.partial(_on_issue_done, key, state),
             )
             state.tasks[key] = task
+
+            if shutdown_event is not None:
+                # Yield so the event loop can process signal callbacks
+                # (e.g. SIGTERM setting shutdown_event) between task spawns.
+                await asyncio.sleep(0)
 
 
 async def drain_tasks(state: DaemonState) -> None:
@@ -206,9 +225,9 @@ async def daemon_loop(config: Config, *, once: bool = False) -> None:
     Installs SIGTERM/SIGINT handlers that gracefully drain in-flight tasks
     before exiting. A second signal force-cancels all tasks.
     """
-    state = DaemonState()
-    poll_interval = config.defaults.poll_interval
     shutdown_event = asyncio.Event()
+    state = DaemonState(shutdown_event=shutdown_event)
+    poll_interval = config.defaults.poll_interval
 
     # Persistent state
     ADL_HOME.mkdir(parents=True, exist_ok=True)

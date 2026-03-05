@@ -245,3 +245,59 @@ async def test_daemon_loop_signal_stops_sleep():
 
     # Loop should exit after 1 cycle without sleeping the full 60 seconds
     assert cycle_count == 1
+
+
+@pytest.mark.asyncio
+async def test_run_poll_cycle_respects_shutdown_event():
+    """No new tasks are spawned when shutdown_event is already set."""
+    issues = [
+        Issue(id=1, number=10, repo="owner/repo", title="a", body="b"),
+        Issue(id=2, number=20, repo="owner/repo", title="c", body="d"),
+    ]
+    state = DaemonState()
+    cfg = _config()
+    cfg.defaults.max_concurrent = 5
+
+    shutdown_event = asyncio.Event()
+    shutdown_event.set()  # Already shutting down
+
+    mock_process = AsyncMock(return_value=MagicMock(state="completed"))
+
+    with patch("auto_dev_loop.main.poll_project_issues", return_value=issues):
+        with patch("auto_dev_loop.main.process_issue", mock_process):
+            await run_poll_cycle(cfg, state, shutdown_event=shutdown_event)
+
+    assert len(state.tasks) == 0
+    assert len(state.active_issues) == 0
+    mock_process.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_run_poll_cycle_stops_mid_cycle_on_shutdown():
+    """If shutdown_event is set during iteration, no further tasks spawn."""
+    issues = [
+        Issue(id=1, number=10, repo="owner/repo", title="a", body="b"),
+        Issue(id=2, number=20, repo="owner/repo", title="c", body="d"),
+        Issue(id=3, number=30, repo="owner/repo", title="e", body="f"),
+    ]
+    state = DaemonState()
+    cfg = _config()
+    cfg.defaults.max_concurrent = 5
+
+    shutdown_event = asyncio.Event()
+    call_count = 0
+
+    async def process_and_shutdown(issue, config, **kw):
+        nonlocal call_count
+        call_count += 1
+        # Set shutdown after first task is spawned (task runs inline here via mock)
+        shutdown_event.set()
+        return MagicMock(state="completed")
+
+    with patch("auto_dev_loop.main.poll_project_issues", return_value=issues):
+        with patch("auto_dev_loop.main.process_issue", side_effect=process_and_shutdown):
+            await run_poll_cycle(cfg, state, shutdown_event=shutdown_event)
+            await drain_tasks(state)
+
+    # Only 1 task should have been spawned before shutdown took effect
+    assert call_count == 1
