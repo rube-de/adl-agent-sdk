@@ -147,3 +147,105 @@ async def test_send_failure_propagates_exception():
 
     assert exc_info.value.code == 400
     drain_task.cancel()
+
+
+@pytest.mark.asyncio
+async def test_retry_after_does_not_block_other_items():
+    """A rate-limited SEND must not block a subsequent DELETE."""
+    from auto_dev_loop.telegram.models import RetryAfter
+
+    RETRY_DELAY = 0.5  # long enough to make blocking obvious
+
+    class RetryOnceSendClient:
+        def __init__(self):
+            self.calls: list[tuple[str, dict]] = []
+            self._send_count = 0
+
+        async def send_message(self, **kw):
+            self._send_count += 1
+            if self._send_count == 1:
+                raise RetryAfter(retry_after=RETRY_DELAY)
+            self.calls.append(("send_message", kw))
+
+            class FakeMsg:
+                message_id = 1
+            return FakeMsg()
+
+        async def delete_message(self, **kw):
+            self.calls.append(("delete_message", kw))
+
+        async def edit_message_text(self, **kw):
+            self.calls.append(("edit_message_text", kw))
+
+    client = RetryOnceSendClient()
+    outbox = TelegramOutbox(client)
+
+    # Enqueue a SEND (will hit RetryAfter first dispatch), then a DELETE
+    _future = await outbox.enqueue_send(1, "hello")
+    await outbox.enqueue_delete(1, 999)
+
+    drain_task = asyncio.create_task(outbox.drain_loop())
+
+    # Poll until DELETE is processed (non-blocking) or timeout at well under RETRY_DELAY
+    max_wait = RETRY_DELAY - 0.1
+    poll_interval = 0.01
+    waited = 0.0
+    while not any(c[0] == "delete_message" for c in client.calls) and waited < max_wait:
+        await asyncio.sleep(poll_interval)
+        waited += poll_interval
+    drain_task.cancel()
+
+    delete_calls = [c for c in client.calls if c[0] == "delete_message"]
+    assert len(delete_calls) == 1, (
+        "DELETE should have been processed before SEND's retry window expired"
+    )
+
+
+@pytest.mark.asyncio
+async def test_requeue_tasks_are_tracked_then_cleaned():
+    """Delayed requeue tasks are held in _requeue_tasks and removed on completion."""
+    from auto_dev_loop.telegram.models import RetryAfter
+
+    RETRY_DELAY = 0.3
+
+    class RetryOnceClient:
+        def __init__(self):
+            self._sent = 0
+
+        async def send_message(self, **kw):
+            self._sent += 1
+            if self._sent == 1:
+                raise RetryAfter(retry_after=RETRY_DELAY)
+
+            class FakeMsg:
+                message_id = 1
+            return FakeMsg()
+
+        async def edit_message_text(self, **kw):
+            pass
+
+        async def delete_message(self, **kw):
+            pass
+
+    client = RetryOnceClient()
+    outbox = TelegramOutbox(client)
+    await outbox.enqueue_send(1, "hello")
+
+    drain_task = asyncio.create_task(outbox.drain_loop())
+
+    # Poll until the requeue task has been scheduled, or timeout.
+    max_wait = 0.5
+    poll_interval = 0.01
+    waited = 0.0
+    while len(outbox._requeue_tasks) < 1 and waited < max_wait:
+        await asyncio.sleep(poll_interval)
+        waited += poll_interval
+
+    # Task must be tracked while delay is still running
+    assert len(outbox._requeue_tasks) == 1
+
+    await asyncio.sleep(RETRY_DELAY + 0.1)  # past the retry window
+    drain_task.cancel()
+
+    # After completion the set must be empty (done-callback fired)
+    assert len(outbox._requeue_tasks) == 0

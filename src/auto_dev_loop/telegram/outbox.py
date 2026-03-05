@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass, field
 from enum import IntEnum
 
-from .models import RetryAfter, BotApiError
+from .models import RetryAfter
 
 log = logging.getLogger(__name__)
 
@@ -38,6 +38,7 @@ class TelegramOutbox:
         self._queue: asyncio.PriorityQueue[OutboxItem] = asyncio.PriorityQueue()
         self._pending_edits: dict[str, OutboxItem] = {}
         self._seq = 0
+        self._requeue_tasks: set[asyncio.Task] = set()
 
     def _next_seq(self) -> int:
         self._seq += 1
@@ -76,39 +77,65 @@ class TelegramOutbox:
             kwargs={"chat_id": chat_id, "message_id": message_id},
         ))
 
+    async def _delayed_requeue(self, item: OutboxItem, delay: float) -> None:
+        """Re-enqueue *item* after *delay* seconds without blocking the drain loop."""
+        await asyncio.sleep(delay)
+        await self._queue.put(item)
+
+    def _on_requeue_done(self, task: asyncio.Task) -> None:
+        self._requeue_tasks.discard(task)
+        if not task.cancelled():
+            exc = task.exception()
+            if exc is not None:
+                log.warning("Delayed requeue task raised: %s", exc)
+
+    def _schedule_requeue(self, item: OutboxItem, delay: float) -> None:
+        """Schedule a non-blocking re-enqueue, keeping a strong task reference."""
+        task = asyncio.create_task(self._delayed_requeue(item, delay))
+        self._requeue_tasks.add(task)
+        task.add_done_callback(self._on_requeue_done)
+
     async def drain_loop(self) -> None:
         """Background task: process outbox queue forever."""
-        while True:
-            item = await self._queue.get()
+        try:
+            while True:
+                item = await self._queue.get()
 
-            # For edits, always use the latest coalesced version
-            if item.message_key:
-                if item.message_key not in self._pending_edits:
-                    continue
-                # Honor RetryAfter backoff BEFORE popping so that new
-                # enqueue_edit calls arriving during the sleep can still
-                # coalesce into _pending_edits[key].
-                now = time.monotonic()
-                pending = self._pending_edits[item.message_key]
-                if pending.retry_at > now:
-                    await asyncio.sleep(pending.retry_at - now)
-                item = self._pending_edits.pop(item.message_key)
-            else:
-                # Honor RetryAfter backoff
-                now = time.monotonic()
-                if item.retry_at > now:
-                    await asyncio.sleep(item.retry_at - now)
-
-            try:
-                result = await getattr(self._client, item.method)(**item.kwargs)
-                if item.future and not item.future.done():
-                    item.future.set_result(result)
-            except RetryAfter as e:
-                item.retry_at = time.monotonic() + e.retry_after
+                # For edits, always use the latest coalesced version
                 if item.message_key:
-                    self._pending_edits[item.message_key] = item
-                await self._queue.put(item)
-            except (BotApiError, Exception) as e:
-                log.warning(f"Outbox item failed: {e}")
-                if item.future and not item.future.done():
-                    item.future.set_exception(e)
+                    if item.message_key not in self._pending_edits:
+                        continue
+                    # Honor RetryAfter backoff: re-queue non-blocking so that
+                    # higher-priority items are not blocked during the wait.
+                    now = time.monotonic()
+                    pending = self._pending_edits[item.message_key]
+                    if pending.retry_at > now:
+                        self._schedule_requeue(item, pending.retry_at - now)
+                        continue
+                    item = self._pending_edits.pop(item.message_key)
+                else:
+                    # Honor RetryAfter backoff: re-queue non-blocking.
+                    now = time.monotonic()
+                    if item.retry_at > now:
+                        self._schedule_requeue(item, item.retry_at - now)
+                        continue
+
+                try:
+                    result = await getattr(self._client, item.method)(**item.kwargs)
+                    if item.future and not item.future.done():
+                        item.future.set_result(result)
+                except RetryAfter as e:
+                    item.retry_at = time.monotonic() + e.retry_after
+                    if item.message_key:
+                        self._pending_edits[item.message_key] = item
+                    self._schedule_requeue(item, e.retry_after)
+                except Exception as e:
+                    log.warning("Outbox item failed: %s", e)
+                    if item.future and not item.future.done():
+                        item.future.set_exception(e)
+        finally:
+            for task in list(self._requeue_tasks):
+                task.cancel()
+            if self._requeue_tasks:
+                await asyncio.gather(*self._requeue_tasks, return_exceptions=True)
+            self._requeue_tasks.clear()
