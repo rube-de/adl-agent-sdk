@@ -30,6 +30,7 @@ class DaemonState:
     tasks: dict[str, asyncio.Task] = field(default_factory=dict)
     completed_keys: set[str] = field(default_factory=set)
     store: StateStore | None = None
+    shutdown_event: asyncio.Event | None = None
 
 
 def issue_key(issue: Issue) -> str:
@@ -76,7 +77,10 @@ def _make_issue_logger(issue: Issue) -> IssueLogger:
 
 
 async def _process_issue_task(
-    issue: Issue, config: Config, repo_path: Path, key: str,
+    issue: Issue,
+    config: Config,
+    repo_path: Path,
+    key: str,
     state: DaemonState,
 ) -> None:
     """Task wrapper — runs process_issue and logs the outcome."""
@@ -86,19 +90,30 @@ async def _process_issue_task(
     try:
         if store:
             await store.upsert_issue(
-                issue.repo, issue.number, issue.title, IssueState.CLAIMED.value,
+                issue.repo,
+                issue.number,
+                issue.title,
+                IssueState.CLAIMED.value,
                 project_item_id=issue.project_item_id,
             )
 
         result = await process_issue(
-            issue, config, repo_path=repo_path, store=store, issue_logger=logger,
+            issue,
+            config,
+            repo_path=repo_path,
+            store=store,
+            issue_logger=logger,
         )
         log.info("Completed %s: %s", key, result.state)
 
         if store:
             await store.update_state(issue.id, result.state.value)
 
-        if result.state in (IssueState.COMPLETED, IssueState.FAILED, IssueState.ESCALATED):
+        if result.state in (
+            IssueState.COMPLETED,
+            IssueState.FAILED,
+            IssueState.ESCALATED,
+        ):
             state.completed_keys.add(key)
 
     except Exception:
@@ -112,16 +127,25 @@ async def _process_issue_task(
 
 
 async def run_poll_cycle(
-    config: Config, state: DaemonState, *, once: bool = False,
+    config: Config,
+    state: DaemonState,
+    *,
+    once: bool = False,
+    shutdown_event: asyncio.Event | None = None,
 ) -> None:
     """Run one poll cycle across all configured repos.
 
     When *once* is True, process at most one issue inline and return.
     Otherwise, spawn concurrent tasks gated by max_concurrent.
     """
+    shutdown_event = shutdown_event or state.shutdown_event
     max_concurrent = 1 if once else config.defaults.max_concurrent
 
     for repo_cfg in config.repos:
+        if shutdown_event is not None and shutdown_event.is_set():
+            log.info("Shutdown requested — skipping remaining repos")
+            return
+
         if not isinstance(repo_cfg, RepoConfig):
             continue
 
@@ -153,13 +177,18 @@ async def run_poll_cycle(
                 try:
                     if store:
                         await store.upsert_issue(
-                            issue.repo, issue.number, issue.title,
+                            issue.repo,
+                            issue.number,
+                            issue.title,
                             IssueState.CLAIMED.value,
                             project_item_id=issue.project_item_id,
                         )
                     result = await process_issue(
-                        issue, config, repo_path=Path(repo_cfg.path),
-                        store=store, issue_logger=logger,
+                        issue,
+                        config,
+                        repo_path=Path(repo_cfg.path),
+                        store=store,
+                        issue_logger=logger,
                     )
                     log.info("Completed %s: %s", key, result.state)
                     if store:
@@ -171,6 +200,11 @@ async def run_poll_cycle(
                 return
 
             # Normal mode: spawn a concurrent task
+            if shutdown_event is not None and shutdown_event.is_set():
+                state.active_issues.discard(key)
+                log.info("Shutdown requested — not spawning task for %s", key)
+                return
+
             task = asyncio.create_task(
                 _process_issue_task(issue, config, Path(repo_cfg.path), key, state),
                 name=f"adl:{key}",
@@ -179,6 +213,11 @@ async def run_poll_cycle(
                 functools.partial(_on_issue_done, key, state),
             )
             state.tasks[key] = task
+
+            if shutdown_event is not None:
+                # Yield so newly-spawned tasks can make progress (and
+                # potentially set shutdown_event) before we spawn more.
+                await asyncio.sleep(0)
 
 
 async def drain_tasks(state: DaemonState) -> None:
@@ -206,9 +245,9 @@ async def daemon_loop(config: Config, *, once: bool = False) -> None:
     Installs SIGTERM/SIGINT handlers that gracefully drain in-flight tasks
     before exiting. A second signal force-cancels all tasks.
     """
-    state = DaemonState()
-    poll_interval = config.defaults.poll_interval
     shutdown_event = asyncio.Event()
+    state = DaemonState(shutdown_event=shutdown_event)
+    poll_interval = config.defaults.poll_interval
 
     # Persistent state
     ADL_HOME.mkdir(parents=True, exist_ok=True)
@@ -219,7 +258,9 @@ async def daemon_loop(config: Config, *, once: bool = False) -> None:
     # Load previously-completed issues to avoid reprocessing
     state.completed_keys = await store.list_terminal_issue_keys()
     if state.completed_keys:
-        log.info("Loaded %d completed issue(s) from state DB", len(state.completed_keys))
+        log.info(
+            "Loaded %d completed issue(s) from state DB", len(state.completed_keys)
+        )
 
     def _request_shutdown() -> None:
         if shutdown_event.is_set():
@@ -244,7 +285,8 @@ async def daemon_loop(config: Config, *, once: bool = False) -> None:
 
     log.info(
         "ADL daemon starting (poll_interval=%ds, once=%s)",
-        poll_interval, once,
+        poll_interval,
+        once,
     )
 
     try:
@@ -267,7 +309,9 @@ async def daemon_loop(config: Config, *, once: bool = False) -> None:
                 except (NotImplementedError, RuntimeError) as exc:
                     log.debug("Could not remove signal handler for %s: %s", sig, exc)
                 except Exception:
-                    log.exception("Unexpected error removing signal handler for %s", sig)
+                    log.exception(
+                        "Unexpected error removing signal handler for %s", sig
+                    )
         await drain_tasks(state)
         await store.close()
 
