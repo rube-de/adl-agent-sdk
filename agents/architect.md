@@ -26,4 +26,4 @@ Write a structured implementation plan with:
 - Edge cases to handle
 
 End your response with exactly one of:
-- `PLAN_READY` — plan is complete
+- `<<<VERDICT:PLAN_READY>>>` — plan is complete

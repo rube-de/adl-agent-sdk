@@ -11,6 +11,8 @@ from auto_dev_loop.workflow_engine import (
 from auto_dev_loop.models import (
     Issue, ReviewVerdict, WorkflowResult, has_verdict_line,
     VERDICT_APPROVED, VERDICT_NEEDS_REVISION, VERDICT_VETOED, VERDICT_TESTS_PASSING,
+    VERDICT_PLAN_READY, VERDICT_IMPLEMENTATION_COMPLETE, VERDICT_FIXES_APPLIED,
+    VERDICT_FEEDBACK_APPLIED, APPROVED_MARKERS,
 )
 from auto_dev_loop.workflow_loader import WorkflowConfig, StageConfig
 
@@ -326,6 +328,21 @@ def test_parse_verdict_nonstrict_no_marker():
 
 
 # --- has_verdict_line tests ---
+
+def test_verdict_markers_have_distinctive_format():
+    """Verdict markers should use bracketed format to resist output injection."""
+    all_markers = [
+        VERDICT_APPROVED, VERDICT_NEEDS_REVISION, VERDICT_VETOED,
+        VERDICT_PLAN_READY, VERDICT_TESTS_PASSING,
+        VERDICT_IMPLEMENTATION_COMPLETE, VERDICT_FIXES_APPLIED,
+        VERDICT_FEEDBACK_APPLIED,
+    ]
+    for marker in all_markers:
+        assert marker.startswith("<<<VERDICT:"), f"{marker} missing prefix"
+        assert marker.endswith(">>>"), f"{marker} missing suffix"
+    for marker in APPROVED_MARKERS:
+        assert marker.startswith("<<<VERDICT:"), f"{marker} in APPROVED_MARKERS missing prefix"
+
 
 def test_has_verdict_line_exact_match():
     output = f"Some output\n{VERDICT_TESTS_PASSING}\nMore output"

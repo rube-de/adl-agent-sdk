@@ -27,5 +27,5 @@ working as an Agent Team.
 ## Exit
 
 End your response with:
-- `TESTS_PASSING` — all tests pass, implementation complete
+- `<<<VERDICT:TESTS_PASSING>>>` — all tests pass, implementation complete
 - `MAX_ITERATIONS` — exhausted iteration budget
