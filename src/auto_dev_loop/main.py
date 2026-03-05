@@ -120,6 +120,8 @@ async def run_poll_cycle(
 
     When *once* is True, process at most one issue inline and return.
     Otherwise, spawn concurrent tasks gated by max_concurrent.
+    If *shutdown_event* is provided (or set on *state*), the cycle returns early
+    when the event is set, preventing new task spawns.
     """
     shutdown_event = shutdown_event or state.shutdown_event
     max_concurrent = 1 if once else config.defaults.max_concurrent
@@ -181,7 +183,7 @@ async def run_poll_cycle(
             if shutdown_event is not None and shutdown_event.is_set():
                 state.active_issues.discard(key)
                 log.info("Shutdown requested — not spawning task for %s", key)
-                return
+                break
 
             task = asyncio.create_task(
                 _process_issue_task(issue, config, Path(repo_cfg.path), key, state),
