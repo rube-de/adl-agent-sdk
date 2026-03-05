@@ -59,3 +59,17 @@ def validate(
     except ConfigError as e:
         typer.echo(f"Config error: {e}", err=True)
         raise typer.Exit(1)
+
+
+@app.command()
+def init(
+    config: Path = typer.Option(
+        Path.home() / ".adl" / "config.yaml",
+        "--config", "-c",
+        help="Path where the generated config YAML should be written.",
+    ),
+) -> None:
+    """Run the one-time setup wizard and generate config.yaml."""
+    from .init_wizard import run_init_wizard
+
+    run_init_wizard(config)
