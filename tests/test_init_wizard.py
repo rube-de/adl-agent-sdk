@@ -58,7 +58,7 @@ def test_build_config_data_uses_env_var_reference():
         defaults=dict(DEFAULT_TUNABLE_DEFAULTS),
     )
 
-    assert config_data["telegram"]["bot_token"] == "${TELEGRAM_BOT_TOKEN}"
+    assert config_data["telegram"]["bot_token"] == f"${{{TELEGRAM_BOT_TOKEN_ENV}}}"
     assert config_data["telegram"]["chat_id"] == 12345
     assert config_data["telegram"]["chat_type"] == "supergroup"
     assert config_data["telegram"]["use_topics"] is True
@@ -94,11 +94,26 @@ def test_run_init_wizard_writes_valid_config(tmp_path: Path, monkeypatch) -> Non
     assert config_path.exists()
 
     cfg_yaml = yaml.safe_load(config_path.read_text())
-    assert cfg_yaml["telegram"]["bot_token"] == "${TELEGRAM_BOT_TOKEN}"
+    assert cfg_yaml["telegram"]["bot_token"] == f"${{{TELEGRAM_BOT_TOKEN_ENV}}}"
     assert cfg_yaml["telegram"]["chat_id"] == 424242
+    assert cfg_yaml["telegram"]["chat_type"] == "private"
     assert cfg_yaml["repos"] == []
 
     monkeypatch.setenv(TELEGRAM_BOT_TOKEN_ENV, "token-from-user")
     cfg = load_config(config_path)
     assert cfg.telegram.chat_id == 424242
     assert cfg.model_roles["default"] == DEFAULT_MODEL_ROLES["default"]
+
+
+def test_run_init_wizard_group_chat_without_topics(tmp_path: Path, monkeypatch) -> None:
+    config_path = tmp_path / "config.yaml"
+
+    # negative chat_id, no topics → chat_type should be "group"
+    _patch_prompt_sequence(monkeypatch, ["token-from-user", -100123456])
+    _patch_confirm_sequence(monkeypatch, [False, True, True, True])
+
+    run_init_wizard(config_path)
+
+    cfg_yaml = yaml.safe_load(config_path.read_text())
+    assert cfg_yaml["telegram"]["chat_type"] == "group"
+    assert cfg_yaml["telegram"]["chat_id"] == -100123456

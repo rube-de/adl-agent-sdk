@@ -11,10 +11,9 @@ from typing import Any
 import typer
 import yaml
 
+from ._paths import ADL_HOME
 from .config import load_config
 from .models import Defaults
-
-ADL_HOME = Path.home() / ".adl"
 
 TELEGRAM_BOT_TOKEN_ENV = "TELEGRAM_BOT_TOKEN"
 
@@ -55,7 +54,12 @@ def _prompt_telegram() -> tuple[str, int, str, bool, bool]:
         "Is this a group chat with Topics enabled?",
         default=False,
     )
-    chat_type = "supergroup" if use_topics else "private"
+    if chat_id > 0:
+        chat_type = "private"
+    elif use_topics:
+        chat_type = "supergroup"
+    else:
+        chat_type = "group"
     use_env_token = typer.confirm(
         f"Store bot token as ${{{TELEGRAM_BOT_TOKEN_ENV}}} instead of hardcoding it?",
         default=True,
@@ -134,7 +138,6 @@ def _validate_generated_config(config_data: dict[str, Any], *, bot_token: str) -
     cfg_text = render_config_yaml(config_data)
     temp_path: Path | None = None
 
-    had_env = TELEGRAM_BOT_TOKEN_ENV in os.environ
     previous_env_value = os.environ.get(TELEGRAM_BOT_TOKEN_ENV)
     os.environ[TELEGRAM_BOT_TOKEN_ENV] = bot_token
 
@@ -151,7 +154,7 @@ def _validate_generated_config(config_data: dict[str, Any], *, bot_token: str) -
     finally:
         if temp_path is not None:
             temp_path.unlink(missing_ok=True)
-        if had_env:
+        if previous_env_value is not None:
             os.environ[TELEGRAM_BOT_TOKEN_ENV] = previous_env_value
         else:
             os.environ.pop(TELEGRAM_BOT_TOKEN_ENV, None)
@@ -193,7 +196,6 @@ def run_init_wizard(config_path: Path | None = None) -> Path:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(render_config_yaml(config_data))
-        path.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0600
     except OSError as exc:
         typer.echo(
             f"Failed to write config to {path}: {exc}\n"
@@ -202,10 +204,20 @@ def run_init_wizard(config_path: Path | None = None) -> Path:
         )
         raise typer.Exit(1) from exc
 
+    try:
+        path.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0600
+    except OSError:
+        typer.echo(
+            f"Warning: could not set restrictive permissions on {path}.",
+            err=True,
+        )
+
     typer.echo(f"Config written to {path}")
-    if config_data["telegram"]["bot_token"] == f"${{{TELEGRAM_BOT_TOKEN_ENV}}}":
+    if use_env_token:
         typer.echo(f"Set {TELEGRAM_BOT_TOKEN_ENV} before running `adl validate`.")
-    typer.echo("Next: add a repository to config.yaml under 'repos:',")
-    typer.echo("or use `adl add <path>` once available.")
+    typer.echo("Next steps:")
+    typer.echo("  1. Edit the generated config to add your repositories under `repos:`.")
+    typer.echo("  2. Run `adl validate` to check the configuration.")
+    typer.echo("  3. Run `adl run` to start the auto dev loop.")
 
     return path

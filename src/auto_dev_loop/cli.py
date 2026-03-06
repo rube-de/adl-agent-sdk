@@ -4,6 +4,8 @@ from pathlib import Path
 
 import typer
 
+from ._paths import ADL_CONFIG
+
 app = typer.Typer(name="adl", help="Auto Dev Loop — autonomous development daemon")
 
 
@@ -28,7 +30,7 @@ def main(
 @app.command()
 def run(
     config: Path = typer.Option(
-        Path.home() / ".adl" / "config.yaml",
+        ADL_CONFIG,
         "--config", "-c",
         help="Path to config YAML file.",
     ),
@@ -45,7 +47,7 @@ def run(
 @app.command()
 def validate(
     config: Path = typer.Option(
-        Path.home() / ".adl" / "config.yaml",
+        ADL_CONFIG,
         "--config", "-c",
         help="Path to config YAML file.",
     ),
@@ -64,7 +66,7 @@ def validate(
 @app.command()
 def init(
     config: Path = typer.Option(
-        Path.home() / ".adl" / "config.yaml",
+        ADL_CONFIG,
         "--config", "-c",
         help="Path where the generated config YAML should be written.",
     ),
