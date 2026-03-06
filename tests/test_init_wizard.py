@@ -2,8 +2,8 @@
 
 from pathlib import Path
 
-import click
 import pytest
+import typer
 import yaml
 
 from auto_dev_loop.config import load_config
@@ -20,8 +20,14 @@ from auto_dev_loop.init_wizard import (
 def _patch_prompt_sequence(monkeypatch, values: list[object]) -> None:
     iterator = iter(values)
 
-    def _fake_prompt(*_args, **_kwargs):
-        return next(iterator)
+    def _fake_prompt(*args, **kwargs):
+        try:
+            return next(iterator)
+        except StopIteration:
+            raise AssertionError(
+                f"_fake_prompt exhausted its values. "
+                f"Called with args={args}, kwargs={kwargs}"
+            )
 
     monkeypatch.setattr("auto_dev_loop.init_wizard.typer.prompt", _fake_prompt)
 
@@ -29,8 +35,14 @@ def _patch_prompt_sequence(monkeypatch, values: list[object]) -> None:
 def _patch_confirm_sequence(monkeypatch, values: list[bool]) -> None:
     iterator = iter(values)
 
-    def _fake_confirm(*_args, **_kwargs):
-        return next(iterator)
+    def _fake_confirm(*args, **kwargs):
+        try:
+            return next(iterator)
+        except StopIteration:
+            raise AssertionError(
+                f"_fake_confirm exhausted its values. "
+                f"Called with args={args}, kwargs={kwargs}"
+            )
 
     monkeypatch.setattr("auto_dev_loop.init_wizard.typer.confirm", _fake_confirm)
 
@@ -64,7 +76,7 @@ def test_run_init_wizard_declines_overwrite(tmp_path: Path, monkeypatch) -> None
     _patch_confirm_sequence(monkeypatch, [False])
     _patch_prompt_sequence(monkeypatch, [])
 
-    with pytest.raises(click.exceptions.Exit) as exc_info:
+    with pytest.raises(typer.Exit) as exc_info:
         run_init_wizard(config_path)
 
     assert exc_info.value.exit_code == 1

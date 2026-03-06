@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import stat
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -10,9 +11,10 @@ from typing import Any
 import typer
 import yaml
 
-from .config import ConfigError, load_config
-from .main import ADL_HOME
+from .config import load_config
 from .models import Defaults
+
+ADL_HOME = Path.home() / ".adl"
 
 TELEGRAM_BOT_TOKEN_ENV = "TELEGRAM_BOT_TOKEN"
 
@@ -22,12 +24,13 @@ DEFAULT_MODEL_ROLES = {
     "slow": "claude-opus-4-5",
 }
 
+_DEFAULTS = Defaults()
 DEFAULT_TUNABLE_DEFAULTS = {
-    "poll_interval": Defaults().poll_interval,
-    "max_concurrent": Defaults().max_concurrent,
-    "max_plan_iterations": Defaults().max_plan_iterations,
-    "max_dev_cycles": Defaults().max_dev_cycles,
-    "max_review_cycles": Defaults().max_review_cycles,
+    "poll_interval": _DEFAULTS.poll_interval,
+    "max_concurrent": _DEFAULTS.max_concurrent,
+    "max_plan_iterations": _DEFAULTS.max_plan_iterations,
+    "max_dev_cycles": _DEFAULTS.max_dev_cycles,
+    "max_review_cycles": _DEFAULTS.max_review_cycles,
 }
 
 
@@ -109,6 +112,7 @@ def build_config_data(
         "chat_type": chat_type,
     }
     if use_topics:
+        # Forward ref: consumed by #27 (Telegram topic-per-repo threading)
         telegram["use_topics"] = True
 
     return {
@@ -148,7 +152,7 @@ def _validate_generated_config(config_data: dict[str, Any], *, bot_token: str) -
         if temp_path is not None:
             temp_path.unlink(missing_ok=True)
         if had_env:
-            os.environ[TELEGRAM_BOT_TOKEN_ENV] = previous_env_value or ""
+            os.environ[TELEGRAM_BOT_TOKEN_ENV] = previous_env_value
         else:
             os.environ.pop(TELEGRAM_BOT_TOKEN_ENV, None)
 
@@ -182,16 +186,26 @@ def run_init_wizard(config_path: Path | None = None) -> Path:
 
     try:
         _validate_generated_config(config_data, bot_token=bot_token)
-    except ConfigError as exc:
+    except Exception as exc:
         typer.echo(f"Generated config failed validation: {exc}", err=True)
         raise typer.Exit(1) from exc
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(render_config_yaml(config_data))
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(render_config_yaml(config_data))
+        path.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0600
+    except OSError as exc:
+        typer.echo(
+            f"Failed to write config to {path}: {exc}\n"
+            f"Try again with --config <path>.",
+            err=True,
+        )
+        raise typer.Exit(1) from exc
 
     typer.echo(f"Config written to {path}")
     if config_data["telegram"]["bot_token"] == f"${{{TELEGRAM_BOT_TOKEN_ENV}}}":
         typer.echo(f"Set {TELEGRAM_BOT_TOKEN_ENV} before running `adl validate`.")
-    typer.echo("Next: run `adl add <path>` to add a repository.")
+    typer.echo("Next: add a repository to config.yaml under 'repos:',")
+    typer.echo("or use `adl add <path>` once available.")
 
     return path
