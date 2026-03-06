@@ -36,6 +36,16 @@ def test_repo_slug_raises_on_whitespace_only_owner():
         repo_slug("  ", "my-repo")
 
 
+def test_repo_slug_raises_on_empty_repo():
+    with pytest.raises(ValueError, match="repo name is empty"):
+        repo_slug("my-owner", "")
+
+
+def test_repo_slug_raises_on_whitespace_only_repo():
+    with pytest.raises(ValueError, match="repo name is empty"):
+        repo_slug("my-owner", "  ")
+
+
 def test_repo_state_dir_returns_expected_path():
     result = repo_state_dir("rube-de/adl-agent-sdk")
     assert result == ADL_HOME / "repos" / "rube-de" / "adl-agent-sdk"
