@@ -12,7 +12,7 @@ def repo_slug(owner: str, repo: str) -> str:
     Uses ``/`` as separator so that owner and repo become separate path
     segments, avoiding ambiguity when either component contains ``-``.
 
-    Raises :class:`ValueError` if *owner* is empty after stripping.
+    Raises :class:`ValueError` if *owner* or *repo* is empty after stripping.
     """
     clean_owner = owner.strip().replace("/", "-").replace("\\", "-")
     clean_repo = repo.strip().replace("/", "-").replace("\\", "-")
@@ -20,6 +20,11 @@ def repo_slug(owner: str, repo: str) -> str:
         raise ValueError(
             f"Cannot derive a repo slug: owner is empty for repo '{repo}'. "
             "Set the explicit 'owner' field in your repo config."
+        )
+    if not clean_repo:
+        raise ValueError(
+            f"Cannot derive a repo slug: repo name is empty (owner='{owner}'). "
+            "Check the 'path' field in your repo config."
         )
     return f"{clean_owner}/{clean_repo}"
 
