@@ -1,22 +1,26 @@
 """Tests for the main daemon loop."""
 
 import asyncio
+import logging
 import signal
-from pathlib import Path
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from auto_dev_loop.main import (
     DaemonState,
+    _check_legacy_state,
+    _get_or_create_store,
+    _get_repo_name,
+    _get_repo_owner,
+    _on_issue_done,
     daemon_loop,
     drain_tasks,
+    issue_key,
     run_poll_cycle,
     should_process_issue,
-    issue_key,
-    _on_issue_done,
 )
-from auto_dev_loop.models import Issue, Config, TelegramConfig, Defaults, RepoConfig
+from auto_dev_loop.models import Config, Defaults, Issue, RepoConfig, TelegramConfig
 
 
 def _config():
@@ -24,10 +28,17 @@ def _config():
         telegram=TelegramConfig(bot_token="t", chat_id=1),
         model_roles={"default": "claude-sonnet-4-5"},
         repos=[
-            RepoConfig(path="/tmp/repo", project_number=1),
+            RepoConfig(path="/tmp/repo", project_number=1, owner="test-owner"),
         ],
         defaults=Defaults(max_concurrent=1),
     )
+
+
+def _mock_store():
+    """Create a mock StateStore for per-repo store tests."""
+    store = AsyncMock()
+    store.list_terminal_issue_keys.return_value = set()
+    return store
 
 
 def test_issue_key():
@@ -69,14 +80,22 @@ async def test_run_poll_cycle_spawns_task():
     state = DaemonState()
 
     mock_process = AsyncMock(return_value=MagicMock(state="completed"))
+    mock_store = _mock_store()
 
-    with patch("auto_dev_loop.main.poll_project_issues", return_value=issues):
-        with patch("auto_dev_loop.main.process_issue", mock_process):
-            await run_poll_cycle(_config(), state)
-            # Task was spawned — drain to let it complete
-            assert "owner/repo#42" in state.active_issues
-            assert "owner/repo#42" in state.tasks
-            await drain_tasks(state)
+    with patch(
+        "auto_dev_loop.main._get_or_create_store",
+        new=AsyncMock(return_value=mock_store),
+    ):
+        with patch("auto_dev_loop.main.poll_project_issues", return_value=issues):
+            with patch(
+                "auto_dev_loop.main._make_issue_logger", return_value=MagicMock()
+            ):
+                with patch("auto_dev_loop.main.process_issue", mock_process):
+                    await run_poll_cycle(_config(), state)
+                    # Task was spawned -- drain to let it complete
+                    assert "owner/repo#42" in state.active_issues
+                    assert "owner/repo#42" in state.tasks
+                    await drain_tasks(state)
 
     # Callback cleans up after task completes
     assert "owner/repo#42" not in state.active_issues
@@ -97,13 +116,21 @@ async def test_run_poll_cycle_concurrent_tasks():
     cfg.defaults.max_concurrent = 2
 
     mock_process = AsyncMock(return_value=MagicMock(state="completed"))
+    mock_store = _mock_store()
 
-    with patch("auto_dev_loop.main.poll_project_issues", return_value=issues):
-        with patch("auto_dev_loop.main.process_issue", mock_process):
-            await run_poll_cycle(cfg, state)
-            # Only 2 tasks should be spawned (max_concurrent=2)
-            assert len(state.tasks) == 2
-            await drain_tasks(state)
+    with patch(
+        "auto_dev_loop.main._get_or_create_store",
+        new=AsyncMock(return_value=mock_store),
+    ):
+        with patch("auto_dev_loop.main.poll_project_issues", return_value=issues):
+            with patch(
+                "auto_dev_loop.main._make_issue_logger", return_value=MagicMock()
+            ):
+                with patch("auto_dev_loop.main.process_issue", mock_process):
+                    await run_poll_cycle(cfg, state)
+                    # Only 2 tasks should be spawned (max_concurrent=2)
+                    assert len(state.tasks) == 2
+                    await drain_tasks(state)
 
     assert mock_process.await_count == 2
 
@@ -111,9 +138,14 @@ async def test_run_poll_cycle_concurrent_tasks():
 @pytest.mark.asyncio
 async def test_run_poll_cycle_no_issues():
     state = DaemonState()
+    mock_store = _mock_store()
 
-    with patch("auto_dev_loop.main.poll_project_issues", return_value=[]):
-        await run_poll_cycle(_config(), state)
+    with patch(
+        "auto_dev_loop.main._get_or_create_store",
+        new=AsyncMock(return_value=mock_store),
+    ):
+        with patch("auto_dev_loop.main.poll_project_issues", return_value=[]):
+            await run_poll_cycle(_config(), state)
 
     assert len(state.active_issues) == 0
     assert len(state.tasks) == 0
@@ -131,10 +163,18 @@ async def test_run_poll_cycle_once_processes_single_issue():
     cfg.defaults.max_concurrent = 5  # would normally allow more
 
     mock_process = AsyncMock(return_value=MagicMock(state="completed"))
+    mock_store = _mock_store()
 
-    with patch("auto_dev_loop.main.poll_project_issues", return_value=issues):
-        with patch("auto_dev_loop.main.process_issue", mock_process):
-            await run_poll_cycle(cfg, state, once=True)
+    with patch(
+        "auto_dev_loop.main._get_or_create_store",
+        new=AsyncMock(return_value=mock_store),
+    ):
+        with patch("auto_dev_loop.main.poll_project_issues", return_value=issues):
+            with patch(
+                "auto_dev_loop.main._make_issue_logger", return_value=MagicMock()
+            ):
+                with patch("auto_dev_loop.main.process_issue", mock_process):
+                    await run_poll_cycle(cfg, state, once=True)
 
     # Only one issue processed, no tasks spawned (inline in --once)
     mock_process.assert_awaited_once()
@@ -186,9 +226,6 @@ async def test_daemon_loop_handles_sigterm_gracefully():
     config = _config()
     config.defaults.poll_interval = 0.01
 
-    mock_store = AsyncMock()
-    mock_store.list_terminal_issue_keys.return_value = set()
-
     registered_handlers: dict = {}
     real_loop = asyncio.get_running_loop()
 
@@ -204,11 +241,12 @@ async def test_daemon_loop_handles_sigterm_gracefully():
         if cycle_count == 1 and signal.SIGTERM in registered_handlers:
             registered_handlers[signal.SIGTERM]()
 
-    with patch("auto_dev_loop.main.StateStore", return_value=mock_store):
-        with patch("auto_dev_loop.main.ADL_HOME"):
-            with patch("auto_dev_loop.main.run_poll_cycle", side_effect=counted_cycle):
-                with patch.object(real_loop, "add_signal_handler", side_effect=capture_handler):
-                    await asyncio.wait_for(daemon_loop(config), timeout=2.0)
+    with patch("auto_dev_loop.main.ADL_HOME"):
+        with patch("auto_dev_loop.main.run_poll_cycle", side_effect=counted_cycle):
+            with patch.object(
+                real_loop, "add_signal_handler", side_effect=capture_handler
+            ):
+                await asyncio.wait_for(daemon_loop(config), timeout=2.0)
 
     assert cycle_count == 1
 
@@ -217,10 +255,7 @@ async def test_daemon_loop_handles_sigterm_gracefully():
 async def test_daemon_loop_signal_stops_sleep():
     """SIGTERM interrupts the inter-poll sleep so the loop exits quickly."""
     config = _config()
-    config.defaults.poll_interval = 60  # Long sleep — signal must interrupt it
-
-    mock_store = AsyncMock()
-    mock_store.list_terminal_issue_keys.return_value = set()
+    config.defaults.poll_interval = 60  # Long sleep -- signal must interrupt it
 
     registered_handlers: dict = {}
     real_loop = asyncio.get_running_loop()
@@ -234,14 +269,15 @@ async def test_daemon_loop_signal_stops_sleep():
         nonlocal cycle_count
         cycle_count += 1
         if cycle_count == 1 and signal.SIGTERM in registered_handlers:
-            # Trigger shutdown while we're still "in" the cycle — the sleep afterwards should abort
+            # Trigger shutdown while we're still "in" the cycle
             registered_handlers[signal.SIGTERM]()
 
-    with patch("auto_dev_loop.main.StateStore", return_value=mock_store):
-        with patch("auto_dev_loop.main.ADL_HOME"):
-            with patch("auto_dev_loop.main.run_poll_cycle", side_effect=counted_cycle):
-                with patch.object(real_loop, "add_signal_handler", side_effect=capture_handler):
-                    await asyncio.wait_for(daemon_loop(config), timeout=2.0)
+    with patch("auto_dev_loop.main.ADL_HOME"):
+        with patch("auto_dev_loop.main.run_poll_cycle", side_effect=counted_cycle):
+            with patch.object(
+                real_loop, "add_signal_handler", side_effect=capture_handler
+            ):
+                await asyncio.wait_for(daemon_loop(config), timeout=2.0)
 
     # Loop should exit after 1 cycle without sleeping the full 60 seconds
     assert cycle_count == 1
@@ -286,6 +322,7 @@ async def test_run_poll_cycle_stops_mid_cycle_on_shutdown():
 
     shutdown_event = asyncio.Event()
     call_count = 0
+    mock_store = _mock_store()
 
     async def process_and_shutdown(issue, config, **kw):
         nonlocal call_count
@@ -294,10 +331,139 @@ async def test_run_poll_cycle_stops_mid_cycle_on_shutdown():
         shutdown_event.set()
         return MagicMock(state="completed")
 
-    with patch("auto_dev_loop.main.poll_project_issues", return_value=issues):
-        with patch("auto_dev_loop.main.process_issue", side_effect=process_and_shutdown):
-            await run_poll_cycle(cfg, state, shutdown_event=shutdown_event)
-            await drain_tasks(state)
+    with patch(
+        "auto_dev_loop.main._get_or_create_store",
+        new=AsyncMock(return_value=mock_store),
+    ):
+        with patch("auto_dev_loop.main.poll_project_issues", return_value=issues):
+            with patch(
+                "auto_dev_loop.main._make_issue_logger", return_value=MagicMock()
+            ):
+                with patch(
+                    "auto_dev_loop.main.process_issue", side_effect=process_and_shutdown
+                ):
+                    await run_poll_cycle(cfg, state, shutdown_event=shutdown_event)
+                    await drain_tasks(state)
 
     # Only 1 task should have been spawned before shutdown took effect
     assert call_count == 1
+
+
+def test_get_repo_owner_explicit():
+    cfg = RepoConfig(path="/tmp/repo", project_number=1, owner="my-org")
+    assert _get_repo_owner(cfg) == "my-org"
+
+
+def test_get_repo_owner_from_slash_path():
+    cfg = RepoConfig(path="my-org/my-repo", project_number=1)
+    assert _get_repo_owner(cfg) == "my-org"
+
+
+def test_get_repo_owner_raises_for_absolute_path():
+    cfg = RepoConfig(path="/tmp/repo", project_number=1)
+    with pytest.raises(ValueError, match="Cannot derive owner"):
+        _get_repo_owner(cfg)
+
+
+def test_get_repo_name_from_slash_path():
+    cfg = RepoConfig(path="owner/my-repo", project_number=1)
+    assert _get_repo_name(cfg) == "my-repo"
+
+
+def test_get_repo_name_no_slash():
+    cfg = RepoConfig(path="my-repo", project_number=1)
+    assert _get_repo_name(cfg) == "my-repo"
+
+
+def test_get_repo_name_absolute_path():
+    cfg = RepoConfig(path="/home/user/repos/my-repo", project_number=1)
+    assert _get_repo_name(cfg) == "my-repo"
+
+
+# --- Legacy state migration warning tests (Task 6) ---
+
+
+def test_legacy_state_warns_when_db_exists_without_repos(tmp_path, caplog):
+    legacy_db = tmp_path / "state.db"
+    legacy_db.touch()
+    repos_dir = tmp_path / "repos"
+
+    with caplog.at_level(logging.WARNING):
+        _check_legacy_state(legacy_db, repos_dir)
+
+    assert "migrate" in caplog.text.lower()
+
+
+def test_no_legacy_warning_when_repos_dir_has_subdirs(tmp_path, caplog):
+    legacy_db = tmp_path / "state.db"
+    legacy_db.touch()
+    repos_dir = tmp_path / "repos"
+    repos_dir.mkdir()
+    (repos_dir / "owner" / "my-repo").mkdir(parents=True)
+
+    with caplog.at_level(logging.WARNING):
+        _check_legacy_state(legacy_db, repos_dir)
+
+    assert "migrate" not in caplog.text.lower()
+
+
+def test_legacy_state_warns_when_repos_dir_exists_but_empty(tmp_path, caplog):
+    legacy_db = tmp_path / "state.db"
+    legacy_db.touch()
+    repos_dir = tmp_path / "repos"
+    repos_dir.mkdir()
+
+    with caplog.at_level(logging.WARNING):
+        _check_legacy_state(legacy_db, repos_dir)
+
+    assert "migrate" in caplog.text.lower()
+
+
+def test_no_legacy_warning_when_no_db(tmp_path, caplog):
+    legacy_db = tmp_path / "state.db"
+    repos_dir = tmp_path / "repos"
+
+    with caplog.at_level(logging.WARNING):
+        _check_legacy_state(legacy_db, repos_dir)
+
+    assert "migrate" not in caplog.text.lower()
+
+
+# --- Integration tests for _get_or_create_store (Task 7) ---
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_store_creates_dir(tmp_path):
+    state = DaemonState()
+    slug = "owner-my-repo"
+
+    with patch(
+        "auto_dev_loop.main.repo_state_dir", return_value=tmp_path / "repos" / slug
+    ):
+        store = await _get_or_create_store(state, slug)
+
+    try:
+        assert (tmp_path / "repos" / slug).is_dir()
+        assert (tmp_path / "repos" / slug / "state.db").exists()
+        assert slug in state.stores
+        tables = await store.list_tables()
+        assert "issues" in tables
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_store_reuses_existing(tmp_path):
+    state = DaemonState()
+    slug = "owner-repo"
+
+    with patch(
+        "auto_dev_loop.main.repo_state_dir", return_value=tmp_path / "repos" / slug
+    ):
+        store1 = await _get_or_create_store(state, slug)
+        store2 = await _get_or_create_store(state, slug)
+
+    try:
+        assert store1 is store2
+    finally:
+        await store1.close()
