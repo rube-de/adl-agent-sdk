@@ -9,7 +9,7 @@ import signal
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ._paths import ADL_CONFIG, ADL_HOME, ADL_LOGS_DIR, ADL_STATE_DB
+from ._paths import ADL_CONFIG, ADL_HOME, repo_slug, repo_state_dir
 from .config import load_config
 from .issue_logging import IssueLogger
 from .models import Config, Issue, RepoConfig
@@ -25,7 +25,7 @@ class DaemonState:
     active_issues: set[str] = field(default_factory=set)
     tasks: dict[str, asyncio.Task] = field(default_factory=dict)
     completed_keys: set[str] = field(default_factory=set)
-    store: StateStore | None = None
+    stores: dict[str, StateStore] = field(default_factory=dict)
     shutdown_event: asyncio.Event | None = None
 
 
@@ -69,42 +69,73 @@ def _get_repo_name(repo_cfg: RepoConfig) -> str:
     return repo_cfg.path.rstrip("/").rsplit("/", 1)[-1]
 
 
+async def _get_or_create_store(
+    state: DaemonState,
+    slug: str,
+) -> StateStore:
+    """Return an existing per-repo StateStore or create + init one."""
+    if slug in state.stores:
+        return state.stores[slug]
+    state_dir = repo_state_dir(slug)
+    state_dir.mkdir(parents=True, exist_ok=True)
+    store = StateStore(state_dir / "state.db")
+    await store.init()
+    state.stores[slug] = store
+    return store
+
+
 def _on_issue_done(key: str, state: DaemonState, _task: asyncio.Task) -> None:
     """Callback: clean up state when an issue task finishes."""
     state.active_issues.discard(key)
     state.tasks.pop(key, None)
 
 
-def _make_issue_logger(issue: Issue) -> IssueLogger:
-    """Create a per-issue logger under ~/.adl/logs/."""
-    repo_slug = issue.repo.replace("/", "-")
-    return IssueLogger(ADL_LOGS_DIR, repo_slug, issue.number)
+def _make_issue_logger(issue: Issue, logs_dir: Path) -> IssueLogger:
+    """Create a per-issue logger under the repo-specific logs directory."""
+    slug = issue.repo.replace("/", "-")
+    return IssueLogger(logs_dir, slug, issue.number)
 
 
 async def _process_issue_task(
-    issue: Issue, config: Config, repo_path: Path, key: str,
+    issue: Issue,
+    config: Config,
+    repo_path: Path,
+    key: str,
     state: DaemonState,
+    slug: str,
 ) -> None:
     """Task wrapper — runs process_issue and logs the outcome."""
-    store = state.store
-    logger = _make_issue_logger(issue)
+    store = state.stores.get(slug)
+    logs_dir = repo_state_dir(slug) / "logs"
+    logger = _make_issue_logger(issue, logs_dir)
 
     try:
         if store:
             await store.upsert_issue(
-                issue.repo, issue.number, issue.title, IssueState.CLAIMED.value,
+                issue.repo,
+                issue.number,
+                issue.title,
+                IssueState.CLAIMED.value,
                 project_item_id=issue.project_item_id,
             )
 
         result = await process_issue(
-            issue, config, repo_path=repo_path, store=store, issue_logger=logger,
+            issue,
+            config,
+            repo_path=repo_path,
+            store=store,
+            issue_logger=logger,
         )
         log.info("Completed %s: %s", key, result.state)
 
         if store:
             await store.update_state(issue.id, result.state.value)
 
-        if result.state in (IssueState.COMPLETED, IssueState.FAILED, IssueState.ESCALATED):
+        if result.state in (
+            IssueState.COMPLETED,
+            IssueState.FAILED,
+            IssueState.ESCALATED,
+        ):
             state.completed_keys.add(key)
 
     except Exception:
@@ -118,7 +149,10 @@ async def _process_issue_task(
 
 
 async def run_poll_cycle(
-    config: Config, state: DaemonState, *, once: bool = False,
+    config: Config,
+    state: DaemonState,
+    *,
+    once: bool = False,
     shutdown_event: asyncio.Event | None = None,
 ) -> None:
     """Run one poll cycle across all configured repos.
@@ -140,6 +174,14 @@ async def run_poll_cycle(
             continue
 
         owner = _get_repo_owner(repo_cfg)
+        repo_name = _get_repo_name(repo_cfg)
+        slug = repo_slug(owner, repo_name)
+        store = await _get_or_create_store(state, slug)
+
+        # Load completed keys from this repo's store
+        completed = await store.list_terminal_issue_keys()
+        state.completed_keys.update(completed)
+
         source_column = repo_cfg.columns.get("source", "Ready for Dev")
 
         try:
@@ -164,7 +206,12 @@ async def run_poll_cycle(
                 # --once: process inline, single issue, then return
                 try:
                     await _process_issue_task(
-                        issue, config, Path(repo_cfg.path), key, state,
+                        issue,
+                        config,
+                        Path(repo_cfg.path),
+                        key,
+                        state,
+                        slug,
                     )
                 finally:
                     state.active_issues.discard(key)
@@ -177,7 +224,9 @@ async def run_poll_cycle(
                 break
 
             task = asyncio.create_task(
-                _process_issue_task(issue, config, Path(repo_cfg.path), key, state),
+                _process_issue_task(
+                    issue, config, Path(repo_cfg.path), key, state, slug
+                ),
                 name=f"adl:{key}",
             )
             task.add_done_callback(
@@ -220,16 +269,7 @@ async def daemon_loop(config: Config, *, once: bool = False) -> None:
     state = DaemonState(shutdown_event=shutdown_event)
     poll_interval = config.defaults.poll_interval
 
-    # Persistent state
     ADL_HOME.mkdir(parents=True, exist_ok=True)
-    store = StateStore(ADL_STATE_DB)
-    await store.init()
-    state.store = store
-
-    # Load previously-completed issues to avoid reprocessing
-    state.completed_keys = await store.list_terminal_issue_keys()
-    if state.completed_keys:
-        log.info("Loaded %d completed issue(s) from state DB", len(state.completed_keys))
 
     def _request_shutdown() -> None:
         if shutdown_event.is_set():
@@ -254,7 +294,8 @@ async def daemon_loop(config: Config, *, once: bool = False) -> None:
 
     log.info(
         "ADL daemon starting (poll_interval=%ds, once=%s)",
-        poll_interval, once,
+        poll_interval,
+        once,
     )
 
     try:
@@ -277,9 +318,12 @@ async def daemon_loop(config: Config, *, once: bool = False) -> None:
                 except (NotImplementedError, RuntimeError) as exc:
                     log.debug("Could not remove signal handler for %s: %s", sig, exc)
                 except Exception:
-                    log.exception("Unexpected error removing signal handler for %s", sig)
+                    log.exception(
+                        "Unexpected error removing signal handler for %s", sig
+                    )
         await drain_tasks(state)
-        await store.close()
+        for store in state.stores.values():
+            await store.close()
 
 
 def run_daemon(config_path: str | None = None, *, once: bool = False) -> None:
