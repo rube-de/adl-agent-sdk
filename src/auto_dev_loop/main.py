@@ -54,19 +54,29 @@ def _get_repo_owner(repo_cfg: RepoConfig) -> str:
 
     Prefers the explicit ``owner`` field. Falls back to splitting ``path``
     on '/' for backward compatibility with 'owner/repo'-style paths.
+
+    Raises :class:`ValueError` when an owner cannot be derived (e.g.
+    absolute paths without an explicit ``owner`` field).
     """
     if repo_cfg.owner:
         return repo_cfg.owner
-    return repo_cfg.path.split("/")[0] if "/" in repo_cfg.path else repo_cfg.path
+    candidate = repo_cfg.path.split("/")[0] if "/" in repo_cfg.path else repo_cfg.path
+    if not candidate:
+        raise ValueError(
+            f"Cannot derive owner for repo path '{repo_cfg.path}'. "
+            "Set the explicit 'owner' field in your repo config."
+        )
+    return candidate
 
 
 def _get_repo_name(repo_cfg: RepoConfig) -> str:
     """Extract the repository name from a RepoConfig path.
 
     Handles both ``owner/repo`` and absolute-path styles by taking the
-    last path segment.
+    last path segment.  Uses :class:`~pathlib.Path` for cross-platform
+    compatibility.
     """
-    return repo_cfg.path.rstrip("/").rsplit("/", 1)[-1]
+    return Path(repo_cfg.path.rstrip("/\\")).name
 
 
 async def _get_or_create_store(
@@ -169,12 +179,20 @@ async def run_poll_cycle(
         if not isinstance(repo_cfg, RepoConfig):
             continue
 
-        owner = _get_repo_owner(repo_cfg)
-        repo_name = _get_repo_name(repo_cfg)
+        try:
+            owner = _get_repo_owner(repo_cfg)
+            repo_name = _get_repo_name(repo_cfg)
+        except ValueError as exc:
+            log.error("Skipping repo %s: %s", repo_cfg.path, exc)
+            continue
+
         slug = repo_slug(owner, repo_name)
         store = await _get_or_create_store(state, slug)
 
-        # Load completed keys from this repo's store
+        # Load completed keys from this repo's store.
+        # NOTE: completed_keys grows monotonically (keys are never removed).
+        # Acceptable for typical deployments; consider an LRU cap if the
+        # daemon runs for months with very high issue throughput.
         completed = await store.list_terminal_issue_keys()
         state.completed_keys.update(completed)
 
@@ -255,15 +273,19 @@ async def _interruptible_sleep(seconds: float, shutdown_event: asyncio.Event) ->
 
 def _check_legacy_state(legacy_db: Path, repos_dir: Path) -> None:
     """Warn if a global state.db exists but per-repo dirs don't."""
-    if legacy_db.exists() and not repos_dir.exists():
-        log.warning(
-            "Found legacy global state DB at %s but no per-repo directory at %s. "
-            "Per-repo isolation is now active — old state will not be used. "
-            "To migrate: copy your old state.db into "
-            "~/.adl/repos/<owner>/<repo>/state.db for each repository.",
-            legacy_db,
-            repos_dir,
+    if legacy_db.exists():
+        has_repo_dirs = repos_dir.exists() and any(
+            entry.is_dir() for entry in repos_dir.iterdir()
         )
+        if not has_repo_dirs:
+            log.warning(
+                "Found legacy global state DB at %s but no per-repo directory at %s. "
+                "Per-repo isolation is now active — old state will not be used. "
+                "To migrate: copy your old state.db into "
+                "~/.adl/repos/<owner>/<repo>/state.db for each repository.",
+                legacy_db,
+                repos_dir,
+            )
 
 
 async def daemon_loop(config: Config, *, once: bool = False) -> None:

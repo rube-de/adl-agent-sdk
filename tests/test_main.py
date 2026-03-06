@@ -12,6 +12,7 @@ from auto_dev_loop.main import (
     _check_legacy_state,
     _get_or_create_store,
     _get_repo_name,
+    _get_repo_owner,
     _on_issue_done,
     daemon_loop,
     drain_tasks,
@@ -27,7 +28,7 @@ def _config():
         telegram=TelegramConfig(bot_token="t", chat_id=1),
         model_roles={"default": "claude-sonnet-4-5"},
         repos=[
-            RepoConfig(path="/tmp/repo", project_number=1),
+            RepoConfig(path="/tmp/repo", project_number=1, owner="test-owner"),
         ],
         defaults=Defaults(max_concurrent=1),
     )
@@ -348,6 +349,22 @@ async def test_run_poll_cycle_stops_mid_cycle_on_shutdown():
     assert call_count == 1
 
 
+def test_get_repo_owner_explicit():
+    cfg = RepoConfig(path="/tmp/repo", project_number=1, owner="my-org")
+    assert _get_repo_owner(cfg) == "my-org"
+
+
+def test_get_repo_owner_from_slash_path():
+    cfg = RepoConfig(path="my-org/my-repo", project_number=1)
+    assert _get_repo_owner(cfg) == "my-org"
+
+
+def test_get_repo_owner_raises_for_absolute_path():
+    cfg = RepoConfig(path="/tmp/repo", project_number=1)
+    with pytest.raises(ValueError, match="Cannot derive owner"):
+        _get_repo_owner(cfg)
+
+
 def test_get_repo_name_from_slash_path():
     cfg = RepoConfig(path="owner/my-repo", project_number=1)
     assert _get_repo_name(cfg) == "my-repo"
@@ -377,7 +394,20 @@ def test_legacy_state_warns_when_db_exists_without_repos(tmp_path, caplog):
     assert "migrate" in caplog.text.lower()
 
 
-def test_no_legacy_warning_when_repos_dir_exists(tmp_path, caplog):
+def test_no_legacy_warning_when_repos_dir_has_subdirs(tmp_path, caplog):
+    legacy_db = tmp_path / "state.db"
+    legacy_db.touch()
+    repos_dir = tmp_path / "repos"
+    repos_dir.mkdir()
+    (repos_dir / "owner" / "my-repo").mkdir(parents=True)
+
+    with caplog.at_level(logging.WARNING):
+        _check_legacy_state(legacy_db, repos_dir)
+
+    assert "migrate" not in caplog.text.lower()
+
+
+def test_legacy_state_warns_when_repos_dir_exists_but_empty(tmp_path, caplog):
     legacy_db = tmp_path / "state.db"
     legacy_db.touch()
     repos_dir = tmp_path / "repos"
@@ -386,7 +416,7 @@ def test_no_legacy_warning_when_repos_dir_exists(tmp_path, caplog):
     with caplog.at_level(logging.WARNING):
         _check_legacy_state(legacy_db, repos_dir)
 
-    assert "migrate" not in caplog.text.lower()
+    assert "migrate" in caplog.text.lower()
 
 
 def test_no_legacy_warning_when_no_db(tmp_path, caplog):

@@ -1,5 +1,7 @@
 """Tests for path helpers."""
 
+import pytest
+
 from auto_dev_loop._paths import ADL_HOME, repo_slug, repo_state_dir
 
 
@@ -18,6 +20,20 @@ def test_repo_slug_normalises_slashes():
 def test_repo_slug_no_collision():
     """Different owner/repo pairs must produce different slugs."""
     assert repo_slug("my-org", "my-repo") != repo_slug("my", "org-my-repo")
+
+
+def test_repo_slug_normalises_backslashes():
+    assert repo_slug("org\\team", "my\\repo") == "org-team/my-repo"
+
+
+def test_repo_slug_raises_on_empty_owner():
+    with pytest.raises(ValueError, match="owner is empty"):
+        repo_slug("", "my-repo")
+
+
+def test_repo_slug_raises_on_whitespace_only_owner():
+    with pytest.raises(ValueError, match="owner is empty"):
+        repo_slug("  ", "my-repo")
 
 
 def test_repo_state_dir_returns_expected_path():
