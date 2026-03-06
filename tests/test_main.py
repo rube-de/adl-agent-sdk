@@ -15,6 +15,7 @@ from auto_dev_loop.main import (
     should_process_issue,
     issue_key,
     _on_issue_done,
+    _get_repo_name,
 )
 from auto_dev_loop.models import Issue, Config, TelegramConfig, Defaults, RepoConfig
 
@@ -301,3 +302,18 @@ async def test_run_poll_cycle_stops_mid_cycle_on_shutdown():
 
     # Only 1 task should have been spawned before shutdown took effect
     assert call_count == 1
+
+
+def test_get_repo_name_from_slash_path():
+    cfg = RepoConfig(path="owner/my-repo", project_number=1)
+    assert _get_repo_name(cfg) == "my-repo"
+
+
+def test_get_repo_name_no_slash():
+    cfg = RepoConfig(path="my-repo", project_number=1)
+    assert _get_repo_name(cfg) == "my-repo"
+
+
+def test_get_repo_name_absolute_path():
+    cfg = RepoConfig(path="/home/user/repos/my-repo", project_number=1)
+    assert _get_repo_name(cfg) == "my-repo"

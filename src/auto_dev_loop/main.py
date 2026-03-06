@@ -60,6 +60,15 @@ def _get_repo_owner(repo_cfg: RepoConfig) -> str:
     return repo_cfg.path.split("/")[0] if "/" in repo_cfg.path else repo_cfg.path
 
 
+def _get_repo_name(repo_cfg: RepoConfig) -> str:
+    """Extract the repository name from a RepoConfig path.
+
+    Handles both ``owner/repo`` and absolute-path styles by taking the
+    last path segment.
+    """
+    return repo_cfg.path.rstrip("/").rsplit("/", 1)[-1]
+
+
 def _on_issue_done(key: str, state: DaemonState, _task: asyncio.Task) -> None:
     """Callback: clean up state when an issue task finishes."""
     state.active_issues.discard(key)
