@@ -256,6 +256,18 @@ async def _interruptible_sleep(seconds: float, shutdown_event: asyncio.Event) ->
         pass
 
 
+def _check_legacy_state(legacy_db: Path, repos_dir: Path) -> None:
+    """Warn if a global state.db exists but per-repo dirs don't."""
+    if legacy_db.exists() and not repos_dir.exists():
+        log.warning(
+            "Found legacy global state DB at %s but no per-repo directory at %s. "
+            "Per-repo isolation is now active — old state will not be used. "
+            "Run `adl migrate` or manually move state data if needed.",
+            legacy_db,
+            repos_dir,
+        )
+
+
 async def daemon_loop(config: Config, *, once: bool = False) -> None:
     """Main daemon loop — poll, process, sleep, repeat.
 
@@ -270,6 +282,7 @@ async def daemon_loop(config: Config, *, once: bool = False) -> None:
     poll_interval = config.defaults.poll_interval
 
     ADL_HOME.mkdir(parents=True, exist_ok=True)
+    _check_legacy_state(ADL_HOME / "state.db", ADL_HOME / "repos")
 
     def _request_shutdown() -> None:
         if shutdown_event.is_set():
