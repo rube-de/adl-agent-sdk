@@ -4,6 +4,8 @@ from pathlib import Path
 
 import typer
 
+from ._paths import ADL_CONFIG
+
 app = typer.Typer(name="adl", help="Auto Dev Loop — autonomous development daemon")
 
 
@@ -28,7 +30,7 @@ def main(
 @app.command()
 def run(
     config: Path = typer.Option(
-        Path.home() / ".adl" / "config.yaml",
+        ADL_CONFIG,
         "--config", "-c",
         help="Path to config YAML file.",
     ),
@@ -45,7 +47,7 @@ def run(
 @app.command()
 def validate(
     config: Path = typer.Option(
-        Path.home() / ".adl" / "config.yaml",
+        ADL_CONFIG,
         "--config", "-c",
         help="Path to config YAML file.",
     ),
@@ -59,3 +61,17 @@ def validate(
     except ConfigError as e:
         typer.echo(f"Config error: {e}", err=True)
         raise typer.Exit(1)
+
+
+@app.command()
+def init(
+    config: Path = typer.Option(
+        ADL_CONFIG,
+        "--config", "-c",
+        help="Path where the generated config YAML should be written.",
+    ),
+) -> None:
+    """Run the one-time setup wizard and generate config.yaml."""
+    from .init_wizard import run_init_wizard
+
+    run_init_wizard(config)

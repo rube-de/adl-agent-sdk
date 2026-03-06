@@ -9,6 +9,7 @@ import signal
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ._paths import ADL_CONFIG, ADL_HOME, ADL_LOGS_DIR, ADL_STATE_DB
 from .config import load_config
 from .issue_logging import IssueLogger
 from .models import Config, Issue, RepoConfig
@@ -17,11 +18,6 @@ from .poller import poll_project_issues
 from .state import StateStore
 
 log = logging.getLogger(__name__)
-
-ADL_HOME = Path.home() / ".adl"
-ADL_CONFIG = ADL_HOME / "config.yaml"
-ADL_STATE_DB = ADL_HOME / "state.db"
-ADL_LOGS_DIR = ADL_HOME / "logs"
 
 
 @dataclass
