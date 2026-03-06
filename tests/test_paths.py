@@ -4,20 +4,25 @@ from auto_dev_loop._paths import ADL_HOME, repo_slug, repo_state_dir
 
 
 def test_repo_slug_basic():
-    assert repo_slug("rube-de", "adl-agent-sdk") == "rube-de-adl-agent-sdk"
+    assert repo_slug("rube-de", "adl-agent-sdk") == "rube-de/adl-agent-sdk"
 
 
 def test_repo_slug_strips_whitespace():
-    assert repo_slug("  owner ", " repo ") == "owner-repo"
+    assert repo_slug("  owner ", " repo ") == "owner/repo"
 
 
 def test_repo_slug_normalises_slashes():
-    assert repo_slug("org/team", "my/repo") == "org-team-my-repo"
+    assert repo_slug("org/team", "my/repo") == "org-team/my-repo"
+
+
+def test_repo_slug_no_collision():
+    """Different owner/repo pairs must produce different slugs."""
+    assert repo_slug("my-org", "my-repo") != repo_slug("my", "org-my-repo")
 
 
 def test_repo_state_dir_returns_expected_path():
-    result = repo_state_dir("rube-de-adl-agent-sdk")
-    assert result == ADL_HOME / "repos" / "rube-de-adl-agent-sdk"
+    result = repo_state_dir("rube-de/adl-agent-sdk")
+    assert result == ADL_HOME / "repos" / "rube-de" / "adl-agent-sdk"
 
 
 def test_repo_state_dir_is_under_adl_home():

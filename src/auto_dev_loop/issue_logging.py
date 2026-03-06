@@ -10,8 +10,8 @@ from pathlib import Path
 class IssueLogger:
     """Per-issue logging. Three files: log.jsonl, context.jsonl, state.json."""
 
-    def __init__(self, logs_dir: Path, repo_slug: str, issue_number: int):
-        self._dir = logs_dir / f"{repo_slug}-{issue_number}"
+    def __init__(self, logs_dir: Path, issue_number: int):
+        self._dir = logs_dir / str(issue_number)
         self._dir.mkdir(parents=True, exist_ok=True)
         self._log_path = self._dir / "log.jsonl"
         self._context_path = self._dir / "context.jsonl"

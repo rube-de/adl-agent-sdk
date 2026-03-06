@@ -92,8 +92,7 @@ def _on_issue_done(key: str, state: DaemonState, _task: asyncio.Task) -> None:
 
 def _make_issue_logger(issue: Issue, logs_dir: Path) -> IssueLogger:
     """Create a per-issue logger under the repo-specific logs directory."""
-    slug = issue.repo.replace("/", "-")
-    return IssueLogger(logs_dir, slug, issue.number)
+    return IssueLogger(logs_dir, issue.number)
 
 
 async def _process_issue_task(
@@ -103,21 +102,20 @@ async def _process_issue_task(
     key: str,
     state: DaemonState,
     slug: str,
+    store: StateStore,
 ) -> None:
     """Task wrapper — runs process_issue and logs the outcome."""
-    store = state.stores.get(slug)
     logs_dir = repo_state_dir(slug) / "logs"
     logger = _make_issue_logger(issue, logs_dir)
 
     try:
-        if store:
-            await store.upsert_issue(
-                issue.repo,
-                issue.number,
-                issue.title,
-                IssueState.CLAIMED.value,
-                project_item_id=issue.project_item_id,
-            )
+        await store.upsert_issue(
+            issue.repo,
+            issue.number,
+            issue.title,
+            IssueState.CLAIMED.value,
+            project_item_id=issue.project_item_id,
+        )
 
         result = await process_issue(
             issue,
@@ -128,8 +126,7 @@ async def _process_issue_task(
         )
         log.info("Completed %s: %s", key, result.state)
 
-        if store:
-            await store.update_state(issue.id, result.state.value)
+        await store.update_state(issue.id, result.state.value)
 
         if result.state in (
             IssueState.COMPLETED,
@@ -140,11 +137,10 @@ async def _process_issue_task(
 
     except Exception:
         log.exception("Failed processing %s", key)
-        if store:
-            try:
-                await store.update_state(issue.id, IssueState.FAILED.value)
-            except Exception:
-                log.warning("Could not persist failure state for %s", key)
+        try:
+            await store.update_state(issue.id, IssueState.FAILED.value)
+        except Exception:
+            log.warning("Could not persist failure state for %s", key)
         state.completed_keys.add(key)
 
 
@@ -212,6 +208,7 @@ async def run_poll_cycle(
                         key,
                         state,
                         slug,
+                        store,
                     )
                 finally:
                     state.active_issues.discard(key)
@@ -225,7 +222,7 @@ async def run_poll_cycle(
 
             task = asyncio.create_task(
                 _process_issue_task(
-                    issue, config, Path(repo_cfg.path), key, state, slug
+                    issue, config, Path(repo_cfg.path), key, state, slug, store
                 ),
                 name=f"adl:{key}",
             )
@@ -262,7 +259,8 @@ def _check_legacy_state(legacy_db: Path, repos_dir: Path) -> None:
         log.warning(
             "Found legacy global state DB at %s but no per-repo directory at %s. "
             "Per-repo isolation is now active — old state will not be used. "
-            "Run `adl migrate` or manually move state data if needed.",
+            "To migrate: copy your old state.db into "
+            "~/.adl/repos/<owner>/<repo>/state.db for each repository.",
             legacy_db,
             repos_dir,
         )
