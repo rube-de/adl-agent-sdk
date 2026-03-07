@@ -1,0 +1,36 @@
+id: ops_change
+description: Infrastructure/ops changes — plan, implement, security gate, deploy
+
+stages:
+  - ref: plan
+    agent: architect
+
+  - ref: plan_review
+    agent: plan_reviewer
+    loopTarget: plan
+    maxIterations: 2
+
+  - ref: dev
+    type: team
+    agent: orchestrator
+    team:
+      tester:
+        agent: tester
+        model_role: smol
+      developer:
+        agent: developer
+        model_role: default
+
+  - ref: security
+    agent: security_reviewer
+    canVeto: true
+    loopTarget: dev
+    maxIterations: 1
+
+  - ref: create_pr
+    type: infrastructure
+    agent: _infra
+
+  - ref: pr_review
+    type: infrastructure
+    agent: _infra
