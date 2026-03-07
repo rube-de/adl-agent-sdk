@@ -155,3 +155,27 @@ def list_status_options(owner: str, project_number: int) -> list[str]:
         ):
             return [opt["name"] for opt in field.get("options", [])]
     return []
+
+
+_COLUMN_CANDIDATES: dict[str, list[str]] = {
+    "source": ["Ready for Dev", "Ready", "Todo", "To Do", "Backlog"],
+    "in_progress": ["In Progress", "In progress", "Doing", "Active", "Working"],
+    "done": ["Done", "Complete", "Completed", "Closed", "Shipped"],
+}
+
+
+def detect_column_defaults(options: list[str]) -> dict[str, str]:
+    """Try to auto-match status options to source/in_progress/done columns.
+
+    Returns a dict with matched keys only (may be partial or empty).
+    Values are the actual option names (preserving original casing).
+    """
+    lower_to_actual = {opt.lower(): opt for opt in options}
+    matched: dict[str, str] = {}
+    for role, candidates in _COLUMN_CANDIDATES.items():
+        for candidate in candidates:
+            actual = lower_to_actual.get(candidate.lower())
+            if actual is not None:
+                matched[role] = actual
+                break
+    return matched

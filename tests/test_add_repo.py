@@ -12,6 +12,7 @@ from auto_dev_loop.add_repo import (
     AddRepoError,
     append_repo_config,
     check_gh_available,
+    detect_column_defaults,
     detect_github_remote,
     is_repo_configured,
     list_gh_projects,
@@ -241,3 +242,48 @@ class TestListStatusOptions:
         mock_run.return_value = _mock_run(stdout=json.dumps(fields))
         result = list_status_options("acme", 1)
         assert result == []
+
+
+# --- Column auto-detection ---
+
+
+def test_detect_column_defaults_standard_names():
+    options = ["Backlog", "Ready for Dev", "In Progress", "Done", "Archived"]
+    result = detect_column_defaults(options)
+    assert result == {
+        "source": "Ready for Dev",
+        "in_progress": "In Progress",
+        "done": "Done",
+    }
+
+
+def test_detect_column_defaults_alternative_names():
+    options = ["Todo", "Doing", "Complete"]
+    result = detect_column_defaults(options)
+    assert result == {
+        "source": "Todo",
+        "in_progress": "Doing",
+        "done": "Complete",
+    }
+
+
+def test_detect_column_defaults_partial_match():
+    options = ["Custom Source", "In Progress", "Done"]
+    result = detect_column_defaults(options)
+    assert result.get("source") is None
+    assert result["in_progress"] == "In Progress"
+    assert result["done"] == "Done"
+
+
+def test_detect_column_defaults_no_match():
+    options = ["Alpha", "Beta", "Gamma"]
+    result = detect_column_defaults(options)
+    assert result == {}
+
+
+def test_detect_column_defaults_case_insensitive():
+    options = ["ready for dev", "in progress", "done"]
+    result = detect_column_defaults(options)
+    assert result["source"] == "ready for dev"
+    assert result["in_progress"] == "in progress"
+    assert result["done"] == "done"
