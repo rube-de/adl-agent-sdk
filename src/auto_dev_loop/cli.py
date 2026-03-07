@@ -75,3 +75,21 @@ def init(
     from .init_wizard import run_init_wizard
 
     run_init_wizard(config)
+
+
+@app.command()
+def add(
+    path: Path = typer.Argument(
+        None,
+        help="Path to the git repository to onboard. Defaults to current directory.",
+    ),
+    config: Path = typer.Option(
+        ADL_CONFIG,
+        "--config", "-c",
+        help="Path to config YAML file.",
+    ),
+) -> None:
+    """Onboard a repository — detect GitHub info, scaffold agents, update config."""
+    from .add_repo import run_add_wizard
+
+    run_add_wizard(path, config)

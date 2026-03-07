@@ -50,3 +50,49 @@ def test_cli_init_invokes_wizard(monkeypatch, tmp_path: Path):
 
     assert result.exit_code == 0
     assert called["config_path"] == config_path
+
+
+def test_cli_add_help():
+    result = runner.invoke(app, ["add", "--help"])
+    assert result.exit_code == 0
+    assert "onboard" in result.stdout.lower() or "repo" in result.stdout.lower()
+
+
+def test_cli_add_invokes_wizard(monkeypatch, tmp_path: Path):
+    called: dict[str, object] = {}
+
+    def fake_run_add_wizard(repo_path, config_path):
+        called["repo_path"] = repo_path
+        called["config_path"] = config_path
+
+    monkeypatch.setattr(
+        "auto_dev_loop.add_repo.run_add_wizard",
+        fake_run_add_wizard,
+    )
+
+    config_path = tmp_path / "config.yaml"
+    repo_path = tmp_path / "my-app"
+    result = runner.invoke(
+        app,
+        ["add", str(repo_path), "--config", str(config_path)],
+    )
+    assert result.exit_code == 0
+    assert called["repo_path"] == repo_path
+    assert called["config_path"] == config_path
+
+
+def test_cli_add_defaults_to_cwd_when_no_path(monkeypatch, tmp_path: Path):
+    called: dict[str, object] = {}
+
+    def fake_run_add_wizard(repo_path, config_path):
+        called["repo_path"] = repo_path
+
+    monkeypatch.setattr(
+        "auto_dev_loop.add_repo.run_add_wizard",
+        fake_run_add_wizard,
+    )
+
+    config_path = tmp_path / "config.yaml"
+    result = runner.invoke(app, ["add", "--config", str(config_path)])
+    assert result.exit_code == 0
+    assert called["repo_path"] is None
