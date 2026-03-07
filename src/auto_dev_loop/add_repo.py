@@ -8,7 +8,11 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import typer
 import yaml
+
+from ._paths import ADL_CONFIG
+from .bundled import BUNDLED_AGENTS_DIR, BUNDLED_WORKFLOWS_DIR
 
 
 class AddRepoError(Exception):
@@ -179,3 +183,148 @@ def detect_column_defaults(options: list[str]) -> dict[str, str]:
                 matched[role] = actual
                 break
     return matched
+
+
+def _prompt_column(role: str, options: list[str], default: str | None) -> str:
+    """Prompt user to select a column for a given role."""
+    if default:
+        typer.echo(f"  {role}: {default}")
+        return default
+
+    typer.echo(f"  Select column for '{role}':")
+    for i, opt in enumerate(options, 1):
+        typer.echo(f"    {i}. {opt}")
+    idx = typer.prompt(f"  {role} column number", type=int)
+    if 1 <= idx <= len(options):
+        return options[idx - 1]
+    return typer.prompt(f"  Custom column name for {role}")
+
+
+def _prompt_columns(options: list[str]) -> dict[str, str]:
+    """Prompt user to map source/in_progress/done columns."""
+    defaults = detect_column_defaults(options)
+
+    if len(defaults) == 3:
+        typer.echo("Detected column mappings:")
+        for role, col in defaults.items():
+            typer.echo(f"  {role}: {col}")
+        if typer.confirm("Use these column mappings?", default=True):
+            return defaults
+
+    typer.echo("Map project columns:")
+    columns = {}
+    for role in ("source", "in_progress", "done"):
+        columns[role] = _prompt_column(role, options, defaults.get(role))
+    return columns
+
+
+def _prompt_project(projects: list[dict[str, Any]]) -> dict[str, Any]:
+    """Prompt user to select a project from the list."""
+    if len(projects) == 1:
+        project = projects[0]
+        typer.echo(f"Using project #{project['number']} - {project['title']}")
+        return project
+
+    typer.echo("Available projects:")
+    for i, p in enumerate(projects, 1):
+        typer.echo(f"  {i}. #{p['number']} - {p['title']}")
+    idx = typer.prompt("Select project", type=int)
+    if 1 <= idx <= len(projects):
+        return projects[idx - 1]
+    raise AddRepoError(f"Invalid selection: {idx}")
+
+
+def run_add_wizard(
+    repo_path: Path | None = None,
+    config_path: Path | None = None,
+) -> None:
+    """Run the interactive repo onboarding wizard."""
+    config_path = config_path or ADL_CONFIG
+
+    # 1. Check config exists
+    if not config_path.exists():
+        typer.echo("No config found. Run `adl init` first.", err=True)
+        raise typer.Exit(1)
+
+    # 2. Resolve repo path
+    resolved = (repo_path or Path.cwd()).resolve()
+    if not (resolved / ".git").is_dir():
+        typer.echo(f"{resolved} is not a git repository.", err=True)
+        raise typer.Exit(1)
+
+    # 3. Check for duplicates
+    if is_repo_configured(config_path, resolved):
+        typer.echo(f"Repository {resolved} is already configured.")
+        if not typer.confirm("Reconfigure?", default=False):
+            raise typer.Exit(0)
+
+    # 4. Check gh CLI
+    try:
+        check_gh_available()
+    except AddRepoError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+
+    # 5. Detect GitHub info
+    try:
+        owner, repo = detect_github_remote(resolved)
+    except AddRepoError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"Detected GitHub repo: {owner}/{repo}")
+
+    # 6. List and select project
+    try:
+        projects = list_gh_projects(owner)
+    except AddRepoError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+
+    if not projects:
+        typer.echo(
+            f"No GitHub Projects V2 found for {owner}.\n"
+            f"Create one at https://github.com/orgs/{owner}/projects "
+            f"or https://github.com/users/{owner}/projects",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    project = _prompt_project(projects)
+
+    # 7. Map columns
+    try:
+        status_options = list_status_options(owner, project["number"])
+    except AddRepoError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+
+    if status_options:
+        columns = _prompt_columns(status_options)
+    else:
+        typer.echo("No Status field found. Using default column names.")
+        columns = {
+            "source": "Ready for Dev",
+            "in_progress": "In Progress",
+            "done": "Done",
+        }
+
+    # 8. Scaffold agents and workflows
+    agents_copied = scaffold_files(BUNDLED_AGENTS_DIR, resolved / "agents")
+    workflows_copied = scaffold_files(BUNDLED_WORKFLOWS_DIR, resolved / "workflows")
+    if agents_copied:
+        typer.echo(f"Scaffolded agents: {', '.join(agents_copied)}")
+    if workflows_copied:
+        typer.echo(f"Scaffolded workflows: {', '.join(workflows_copied)}")
+    if not agents_copied and not workflows_copied:
+        typer.echo("All agent/workflow files already exist, nothing scaffolded.")
+
+    # 9. Append to config
+    entry = {
+        "path": str(resolved),
+        "project_number": project["number"],
+        "owner": owner,
+        "columns": columns,
+    }
+    append_repo_config(config_path, entry)
+
+    typer.echo(f"Added {owner}/{repo}. Run `adl run` to start processing.")

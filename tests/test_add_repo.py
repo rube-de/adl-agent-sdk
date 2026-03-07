@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import typer
 import yaml
 
 from auto_dev_loop.add_repo import (
@@ -18,6 +19,7 @@ from auto_dev_loop.add_repo import (
     list_gh_projects,
     list_status_options,
     load_config_raw,
+    run_add_wizard,
     scaffold_files,
 )
 from auto_dev_loop.bundled import BUNDLED_AGENTS_DIR, BUNDLED_WORKFLOWS_DIR
@@ -287,3 +289,153 @@ def test_detect_column_defaults_case_insensitive():
     assert result["source"] == "ready for dev"
     assert result["in_progress"] == "in progress"
     assert result["done"] == "done"
+
+
+# --- Add wizard ---
+
+
+def _setup_wizard_env(tmp_path, *, config_data=None):
+    """Helper to create config file and a fake git repo dir."""
+    cfg_path = tmp_path / "config.yaml"
+    data = config_data or _minimal_config()
+    _write_config(cfg_path, data)
+
+    repo = tmp_path / "my-app"
+    repo.mkdir(exist_ok=True)
+    (repo / ".git").mkdir(exist_ok=True)
+
+    return cfg_path, repo
+
+
+class TestRunAddWizard:
+    def test_fails_without_config(self, tmp_path: Path):
+        cfg = tmp_path / "nonexistent.yaml"
+        repo = tmp_path / "my-app"
+        repo.mkdir()
+        (repo / ".git").mkdir()
+        with pytest.raises(typer.Exit) as exc_info:
+            run_add_wizard(repo, cfg)
+        assert exc_info.value.exit_code == 1
+
+    def test_fails_without_git_dir(self, tmp_path: Path):
+        cfg_path = tmp_path / "config.yaml"
+        _write_config(cfg_path, _minimal_config())
+        repo = tmp_path / "not-a-repo"
+        repo.mkdir()
+        with pytest.raises(typer.Exit) as exc_info:
+            run_add_wizard(repo, cfg_path)
+        assert exc_info.value.exit_code == 1
+
+    @patch("auto_dev_loop.add_repo.check_gh_available")
+    @patch("auto_dev_loop.add_repo.detect_github_remote")
+    @patch("auto_dev_loop.add_repo.list_gh_projects")
+    @patch("auto_dev_loop.add_repo.list_status_options")
+    @patch("auto_dev_loop.add_repo.scaffold_files")
+    def test_happy_path_single_project(
+        self,
+        mock_scaffold,
+        mock_status,
+        mock_projects,
+        mock_detect,
+        mock_gh_check,
+        tmp_path: Path,
+        monkeypatch,
+    ):
+        cfg_path, repo_path = _setup_wizard_env(tmp_path)
+
+        mock_detect.return_value = ("acme", "my-app")
+        mock_projects.return_value = [{"number": 1, "title": "Dev Board"}]
+        mock_status.return_value = ["Ready for Dev", "In Progress", "Done"]
+        mock_scaffold.return_value = ["developer.md"]
+
+        # confirm: use detected columns? -> Yes
+        monkeypatch.setattr(
+            "auto_dev_loop.add_repo.typer.confirm", lambda *a, **kw: True
+        )
+
+        run_add_wizard(repo_path, cfg_path)
+
+        result = load_config_raw(cfg_path)
+        assert len(result["repos"]) == 1
+        entry = result["repos"][0]
+        assert entry["path"] == str(repo_path)
+        assert entry["project_number"] == 1
+        assert entry["owner"] == "acme"
+        assert entry["columns"]["source"] == "Ready for Dev"
+
+    @patch("auto_dev_loop.add_repo.check_gh_available")
+    @patch("auto_dev_loop.add_repo.detect_github_remote")
+    @patch("auto_dev_loop.add_repo.list_gh_projects")
+    def test_no_projects_exits_with_error(
+        self,
+        mock_projects,
+        mock_detect,
+        mock_gh_check,
+        tmp_path: Path,
+    ):
+        cfg_path, repo_path = _setup_wizard_env(tmp_path)
+        mock_detect.return_value = ("acme", "my-app")
+        mock_projects.return_value = []
+
+        with pytest.raises(typer.Exit) as exc_info:
+            run_add_wizard(repo_path, cfg_path)
+        assert exc_info.value.exit_code == 1
+
+    @patch("auto_dev_loop.add_repo.check_gh_available")
+    @patch("auto_dev_loop.add_repo.detect_github_remote")
+    @patch("auto_dev_loop.add_repo.list_gh_projects")
+    @patch("auto_dev_loop.add_repo.list_status_options")
+    @patch("auto_dev_loop.add_repo.scaffold_files")
+    def test_multiple_projects_prompts_selection(
+        self,
+        mock_scaffold,
+        mock_status,
+        mock_projects,
+        mock_detect,
+        mock_gh_check,
+        tmp_path: Path,
+        monkeypatch,
+    ):
+        cfg_path, repo_path = _setup_wizard_env(tmp_path)
+        mock_detect.return_value = ("acme", "my-app")
+        mock_projects.return_value = [
+            {"number": 1, "title": "Dev Board"},
+            {"number": 3, "title": "Ops Board"},
+        ]
+        mock_status.return_value = ["Todo", "In Progress", "Done"]
+        mock_scaffold.return_value = []
+
+        prompt_values = iter([1])  # select first project
+
+        def fake_prompt(*args, **kwargs):
+            return next(prompt_values)
+
+        confirm_values = iter([True])  # accept column defaults
+
+        def fake_confirm(*args, **kwargs):
+            return next(confirm_values)
+
+        monkeypatch.setattr("auto_dev_loop.add_repo.typer.prompt", fake_prompt)
+        monkeypatch.setattr("auto_dev_loop.add_repo.typer.confirm", fake_confirm)
+
+        run_add_wizard(repo_path, cfg_path)
+
+        result = load_config_raw(cfg_path)
+        assert result["repos"][0]["project_number"] == 1
+
+    def test_already_configured_warns(self, tmp_path: Path, monkeypatch):
+        repo_path = tmp_path / "my-app"
+        repo_path.mkdir()
+        (repo_path / ".git").mkdir()
+        cfg_path = tmp_path / "config.yaml"
+        data = _minimal_config()
+        data["repos"] = [{"path": str(repo_path), "project_number": 1}]
+        _write_config(cfg_path, data)
+
+        monkeypatch.setattr(
+            "auto_dev_loop.add_repo.typer.confirm", lambda *a, **kw: False
+        )
+
+        with pytest.raises(typer.Exit) as exc_info:
+            run_add_wizard(repo_path, cfg_path)
+        assert exc_info.value.exit_code == 0
