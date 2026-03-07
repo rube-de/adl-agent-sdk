@@ -1,12 +1,21 @@
 """Tests for adl add — repo onboarding."""
 
+import json
+import subprocess
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
+import pytest
 import yaml
 
 from auto_dev_loop.add_repo import (
+    AddRepoError,
     append_repo_config,
+    check_gh_available,
+    detect_github_remote,
     is_repo_configured,
+    list_gh_projects,
+    list_status_options,
     load_config_raw,
     scaffold_files,
 )
@@ -128,3 +137,107 @@ def test_append_repo_config_preserves_existing(tmp_path: Path):
     assert result["repos"][1]["columns"]["source"] == "Todo"
     assert result["version"] == 3
     assert result["telegram"]["chat_id"] == 123
+
+
+# --- GitHub detection helpers ---
+
+
+def _mock_run(stdout: str = "", returncode: int = 0, stderr: str = ""):
+    result = MagicMock(spec=subprocess.CompletedProcess)
+    result.stdout = stdout
+    result.stderr = stderr
+    result.returncode = returncode
+    return result
+
+
+class TestCheckGhAvailable:
+    @patch("auto_dev_loop.add_repo.subprocess.run")
+    def test_succeeds_when_gh_installed(self, mock_run):
+        mock_run.return_value = _mock_run(stdout="gh version 2.40.0")
+        check_gh_available()
+        assert mock_run.call_count == 2  # --version + auth status
+
+    @patch("auto_dev_loop.add_repo.subprocess.run")
+    def test_raises_when_gh_missing(self, mock_run):
+        mock_run.side_effect = FileNotFoundError("gh not found")
+        with pytest.raises(AddRepoError, match="GitHub CLI"):
+            check_gh_available()
+
+
+class TestDetectGithubRemote:
+    @patch("auto_dev_loop.add_repo.subprocess.run")
+    def test_detects_owner_and_repo(self, mock_run, tmp_path: Path):
+        mock_run.return_value = _mock_run(stdout="acme/my-app\n")
+        owner, repo = detect_github_remote(tmp_path)
+        assert owner == "acme"
+        assert repo == "my-app"
+
+    @patch("auto_dev_loop.add_repo.subprocess.run")
+    def test_raises_on_failure(self, mock_run, tmp_path: Path):
+        mock_run.return_value = _mock_run(returncode=1, stderr="not a git repo")
+        with pytest.raises(AddRepoError, match="GitHub remote"):
+            detect_github_remote(tmp_path)
+
+
+class TestListGhProjects:
+    @patch("auto_dev_loop.add_repo.subprocess.run")
+    def test_returns_project_list(self, mock_run):
+        projects = {
+            "projects": [
+                {"number": 1, "title": "Dev Board"},
+                {"number": 3, "title": "Ops Board"},
+            ],
+            "totalCount": 2,
+        }
+        mock_run.return_value = _mock_run(stdout=json.dumps(projects))
+        result = list_gh_projects("acme")
+        assert len(result) == 2
+        assert result[0]["number"] == 1
+        assert result[1]["title"] == "Ops Board"
+
+    @patch("auto_dev_loop.add_repo.subprocess.run")
+    def test_raises_on_failure(self, mock_run):
+        mock_run.return_value = _mock_run(returncode=1, stderr="auth required")
+        with pytest.raises(AddRepoError, match="projects"):
+            list_gh_projects("acme")
+
+    @patch("auto_dev_loop.add_repo.subprocess.run")
+    def test_returns_empty_list_when_no_projects(self, mock_run):
+        mock_run.return_value = _mock_run(
+            stdout=json.dumps({"projects": [], "totalCount": 0})
+        )
+        result = list_gh_projects("acme")
+        assert result == []
+
+
+class TestListStatusOptions:
+    @patch("auto_dev_loop.add_repo.subprocess.run")
+    def test_returns_status_options(self, mock_run):
+        fields = {
+            "fields": [
+                {"name": "Title", "type": "ProjectV2Field"},
+                {
+                    "name": "Status",
+                    "type": "ProjectV2SingleSelectField",
+                    "options": [
+                        {"name": "Todo"},
+                        {"name": "In Progress"},
+                        {"name": "Done"},
+                    ],
+                },
+            ],
+            "totalCount": 2,
+        }
+        mock_run.return_value = _mock_run(stdout=json.dumps(fields))
+        result = list_status_options("acme", 1)
+        assert result == ["Todo", "In Progress", "Done"]
+
+    @patch("auto_dev_loop.add_repo.subprocess.run")
+    def test_returns_empty_when_no_status_field(self, mock_run):
+        fields = {
+            "fields": [{"name": "Title", "type": "ProjectV2Field"}],
+            "totalCount": 1,
+        }
+        mock_run.return_value = _mock_run(stdout=json.dumps(fields))
+        result = list_status_options("acme", 1)
+        assert result == []
