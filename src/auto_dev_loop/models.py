@@ -150,6 +150,7 @@ class TelegramConfig:
     chat_type: str = "private"
     human_timeout: int = 3600
     progress_updates: bool = True
+    use_topics: bool = False
 
 
 @dataclass
