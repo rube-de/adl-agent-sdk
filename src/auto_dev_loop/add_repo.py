@@ -9,8 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import typer
-import yaml
-from ruamel.yaml import YAML
+from ruamel.yaml import YAML, YAMLError
 
 from ._paths import ADL_CONFIG
 from .bundled import BUNDLED_AGENTS_DIR, BUNDLED_WORKFLOWS_DIR
@@ -20,11 +19,27 @@ class AddRepoError(Exception):
     pass
 
 
-def _roundtrip_yaml() -> YAML:
-    """Create a round-trip YAML instance that preserves comments and formatting."""
-    rt = YAML()
-    rt.preserve_quotes = True
-    return rt
+_RT_YAML = YAML()
+_RT_YAML.preserve_quotes = True
+
+
+def _load_config_rt(config_path: Path) -> Any:
+    """Load config via round-trip YAML, returning an empty dict for empty files."""
+    data = _RT_YAML.load(config_path)
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise AddRepoError(
+            f"Config file {config_path} must contain a YAML mapping at the top level."
+        )
+    return data
+
+
+def _atomic_yaml_write(data: Any, config_path: Path) -> None:
+    """Write YAML data atomically via temp file + rename."""
+    tmp = config_path.with_suffix(".yaml.tmp")
+    _RT_YAML.dump(data, tmp)
+    tmp.replace(config_path)
 
 
 def scaffold_files(source_dir: Path | Traversable, target_dir: Path) -> list[str]:
@@ -53,8 +68,8 @@ def load_config_raw(config_path: Path) -> dict[str, Any]:
     Raises FileNotFoundError if config_path does not exist.
     """
     try:
-        raw = yaml.safe_load(config_path.read_text())
-    except yaml.YAMLError as exc:
+        raw = _RT_YAML.load(config_path)
+    except YAMLError as exc:
         raise AddRepoError(f"Config file {config_path} is not valid YAML.") from exc
     if raw is None:
         return {}
@@ -82,10 +97,7 @@ def is_repo_configured(config_path: Path, repo_path: Path) -> bool:
 
 def _remove_repo_config(config_path: Path, repo_path: Path) -> None:
     """Remove an existing repo entry from config by resolved path."""
-    rt = _roundtrip_yaml()
-    data = rt.load(config_path)
-    if data is None:
-        data = {}
+    data = _load_config_rt(config_path)
     target = str(repo_path.resolve())
     repos = data.get("repos") or []
     if not isinstance(repos, list):
@@ -100,15 +112,12 @@ def _remove_repo_config(config_path: Path, repo_path: Path) -> None:
             and str(Path(r["path"]).expanduser().resolve()) == target
         )
     ]
-    rt.dump(data, config_path)
+    _atomic_yaml_write(data, config_path)
 
 
 def append_repo_config(config_path: Path, entry: dict[str, Any]) -> None:
     """Append a repo entry to the config's repos list and write back."""
-    rt = _roundtrip_yaml()
-    data = rt.load(config_path)
-    if data is None:
-        data = {}
+    data = _load_config_rt(config_path)
     repos = data.get("repos") or []
     if not isinstance(repos, list):
         raise AddRepoError(
@@ -116,7 +125,7 @@ def append_repo_config(config_path: Path, entry: dict[str, Any]) -> None:
         )
     repos.append(entry)
     data["repos"] = repos
-    rt.dump(data, config_path)
+    _atomic_yaml_write(data, config_path)
 
 
 def check_gh_available() -> None:
@@ -293,7 +302,11 @@ def _prompt_column(role: str, options: list[str], default: str | None) -> str:
     if 1 <= idx <= len(options):
         return options[idx - 1]
     typer.echo(f"  Invalid selection '{idx}'. Enter a custom column name:")
-    return typer.prompt(f"  Custom column name for {role}")
+    while True:
+        name = typer.prompt(f"  Custom column name for {role}").strip()
+        if name:
+            return name
+        typer.echo("  Column name must not be empty. Please try again.")
 
 
 def _prompt_columns(options: list[str]) -> dict[str, str]:

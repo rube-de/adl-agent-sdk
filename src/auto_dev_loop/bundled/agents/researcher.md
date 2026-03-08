@@ -31,4 +31,5 @@ End your response with a summary:
 - **Open questions:** [any remaining unknowns]
 - **Recommendation:** [suggested approach based on findings]
 
-End with <<<VERDICT:APPROVED>>> to indicate research is complete.
+On a new line at the very end of your response, output exactly:
+<<<VERDICT:APPROVED>>>
