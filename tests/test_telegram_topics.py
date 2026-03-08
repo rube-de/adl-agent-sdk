@@ -286,3 +286,28 @@ async def test_topics_disabled_sends_no_thread_id(no_topics_config, state_store,
     with patch.object(bot._outbox, "enqueue_send", new_callable=AsyncMock, return_value=mock_future) as mock_send:
         await bot.notify_completion(sample_issue, "https://github.com/pr/1")
     assert "message_thread_id" not in mock_send.call_args.kwargs
+
+
+@pytest.mark.asyncio
+async def test_escalate_sends_to_thread(topics_config, state_store, sample_issue):
+    """escalate() must pass message_thread_id when use_topics=True."""
+    from auto_dev_loop.workflow_loader import StageConfig
+
+    await state_store.store_thread_id("owner/repo", 555)
+    bot = TelegramBot(topics_config, store=state_store)
+
+    mock_msg = Message(message_id=99, chat=Chat(id=-100123, type="supergroup"))
+    mock_future = asyncio.get_event_loop().create_future()
+    mock_future.set_result(mock_msg)
+
+    stage = StageConfig(ref="review", agent="reviewer")
+    verdict = {"result": "needs_human"}
+
+    with patch.object(bot._outbox, "enqueue_send", new_callable=AsyncMock, return_value=mock_future) as mock_send:
+        # escalate blocks waiting for a human decision; use a short timeout
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(
+                bot.escalate(sample_issue, stage, verdict, "Needs review"),
+                timeout=0.1,
+            )
+        assert mock_send.call_args.kwargs.get("message_thread_id") == 555
