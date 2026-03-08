@@ -25,7 +25,12 @@ _RT_YAML.preserve_quotes = True
 
 def _load_config_rt(config_path: Path) -> Any:
     """Load config via round-trip YAML, returning an empty dict for empty files."""
-    data = _RT_YAML.load(config_path)
+    try:
+        data = _RT_YAML.load(config_path)
+    except YAMLError as exc:
+        raise AddRepoError(
+            f"Config file {config_path} is not valid YAML: {exc}"
+        ) from exc
     if data is None:
         return {}
     if not isinstance(data, dict):
@@ -492,8 +497,12 @@ def run_add_wizard(
             raise typer.Exit(1)
 
     # 8. Scaffold agents and workflows
-    agents_copied = scaffold_files(BUNDLED_AGENTS_DIR, resolved / "agents")
-    workflows_copied = scaffold_files(BUNDLED_WORKFLOWS_DIR, resolved / "workflows")
+    try:
+        agents_copied = scaffold_files(BUNDLED_AGENTS_DIR, resolved / "agents")
+        workflows_copied = scaffold_files(BUNDLED_WORKFLOWS_DIR, resolved / "workflows")
+    except OSError as exc:
+        typer.echo(f"Failed to scaffold template files: {exc}", err=True)
+        raise typer.Exit(1) from exc
     if agents_copied:
         typer.echo(f"Scaffolded agents: {', '.join(agents_copied)}")
     if workflows_copied:
