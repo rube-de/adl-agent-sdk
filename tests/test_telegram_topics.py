@@ -120,3 +120,20 @@ async def test_edit_message_text_with_thread_id(bot_client):
         )
         call_kwargs = bot_client.call.call_args
         assert call_kwargs.kwargs["message_thread_id"] == 999
+
+
+@pytest.mark.asyncio
+async def test_telegram_client_forwards_message_thread_id(bot_client):
+    """TelegramClient (rate-limited wrapper) must forward message_thread_id to HttpBotClient."""
+    from auto_dev_loop.telegram.client import TelegramClient
+
+    mock_msg = Message(message_id=42, chat=Chat(id=-100123, type="supergroup"))
+    mock_resp = BotApiResponse(
+        ok=True,
+        result=msgspec.json.encode(mock_msg),
+    )
+    client = TelegramClient(bot_api=bot_client, chat_type="supergroup")
+    with patch.object(bot_client, "call", new_callable=AsyncMock, return_value=mock_resp):
+        await client.send_message(chat_id=-100123, text="hi", message_thread_id=777)
+        call_kwargs = bot_client.call.call_args
+        assert call_kwargs.kwargs["message_thread_id"] == 777
