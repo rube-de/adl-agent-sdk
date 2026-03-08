@@ -79,6 +79,7 @@ def load_config(path: Path) -> Config:
                 "path": r["path"],
                 "project_number": r["project_number"],
                 "owner": r.get("owner"),
+                "repo": r.get("repo"),
             }
             if "columns" in r:
                 kwargs["columns"] = r["columns"]

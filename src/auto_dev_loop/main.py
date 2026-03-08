@@ -70,12 +70,13 @@ def _get_repo_owner(repo_cfg: RepoConfig) -> str:
 
 
 def _get_repo_name(repo_cfg: RepoConfig) -> str:
-    """Extract the repository name from a RepoConfig path.
+    """Extract the repository name from a RepoConfig.
 
-    Handles both ``owner/repo`` and absolute-path styles by taking the
-    last path segment.  Uses :class:`~pathlib.Path` for cross-platform
-    compatibility.
+    Prefers the explicit ``repo`` field (set by ``adl add``), falling back
+    to the last segment of the path for backwards compatibility.
     """
+    if repo_cfg.repo:
+        return repo_cfg.repo
     return Path(repo_cfg.path.rstrip("/\\")).name
 
 

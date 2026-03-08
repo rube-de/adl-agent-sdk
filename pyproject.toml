@@ -10,6 +10,7 @@ dependencies = [
     "pyyaml",
     "typer",
     "aiosqlite",
+    "ruamel-yaml>=0.19.1",
 ]
 
 [project.scripts]
