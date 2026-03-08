@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 import subprocess  # nosec B404 — subprocess used with hardcoded args only
 from importlib.resources.abc import Traversable
 from pathlib import Path
@@ -21,6 +23,8 @@ class AddRepoError(Exception):
 
 _RT_YAML = YAML()
 _RT_YAML.preserve_quotes = True
+
+_PROMPT_MAX_ATTEMPTS = 5
 
 
 def _load_config_rt(config_path: Path) -> Any:
@@ -41,9 +45,16 @@ def _load_config_rt(config_path: Path) -> Any:
 
 
 def _atomic_yaml_write(data: Any, config_path: Path) -> None:
-    """Write YAML data atomically via temp file + rename."""
+    """Write YAML data atomically via temp file + rename, preserving permissions."""
     tmp = config_path.with_suffix(".yaml.tmp")
+    # Preserve original file permissions (e.g. 0600 set by init_wizard)
+    try:
+        original_mode = stat.S_IMODE(os.stat(config_path).st_mode)
+    except FileNotFoundError:
+        original_mode = None
     _RT_YAML.dump(data, tmp)
+    if original_mode is not None:
+        os.chmod(tmp, original_mode)
     tmp.replace(config_path)
 
 
@@ -313,7 +324,7 @@ def _prompt_column(role: str, options: list[str], default: str | None) -> str:
     if 1 <= idx <= len(options):
         return options[idx - 1]
     typer.echo(f"  Invalid selection '{idx}'. Enter a custom column name:")
-    for _attempt in range(5):
+    for _attempt in range(_PROMPT_MAX_ATTEMPTS):
         name = typer.prompt(f"  Custom column name for {role}").strip()
         if name:
             return name
@@ -334,8 +345,7 @@ def _prompt_columns(options: list[str]) -> dict[str, str]:
             return defaults
 
     typer.echo("Map project columns:")
-    max_attempts = 5
-    for _attempt in range(max_attempts):
+    for _attempt in range(_PROMPT_MAX_ATTEMPTS):
         columns = {}
         for role in ("source", "in_progress", "done"):
             columns[role] = _prompt_column(role, options, defaults.get(role))
