@@ -302,11 +302,13 @@ def _prompt_column(role: str, options: list[str], default: str | None) -> str:
     if 1 <= idx <= len(options):
         return options[idx - 1]
     typer.echo(f"  Invalid selection '{idx}'. Enter a custom column name:")
-    while True:
+    for _attempt in range(5):
         name = typer.prompt(f"  Custom column name for {role}").strip()
         if name:
             return name
         typer.echo("  Column name must not be empty. Please try again.")
+    typer.echo("  Too many invalid attempts.", err=True)
+    raise typer.Exit(1)
 
 
 def _prompt_columns(options: list[str]) -> dict[str, str]:
