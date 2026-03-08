@@ -8,6 +8,6 @@ stages:
 
   - ref: code_review
     agent: reviewer
-    reviewers: [reviewer]
+    reviewers: [claude]
     optional: true
     condition: code_review_needed
