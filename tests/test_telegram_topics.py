@@ -122,6 +122,94 @@ async def test_edit_message_text_with_thread_id(bot_client):
         assert call_kwargs.kwargs["message_thread_id"] == 999
 
 
+from auto_dev_loop.telegram import TelegramBot, HumanDecision
+from auto_dev_loop.state import StateStore
+from auto_dev_loop.models import Issue
+
+
+@pytest.fixture
+async def state_store(tmp_path):
+    store = StateStore(tmp_path / "test.db")
+    await store.init()
+    yield store
+    await store.close()
+
+
+@pytest.fixture
+def topics_config():
+    return TelegramConfig(
+        bot_token="fake", chat_id=-100123, chat_type="supergroup",
+        use_topics=True,
+    )
+
+
+@pytest.fixture
+def no_topics_config():
+    return TelegramConfig(
+        bot_token="fake", chat_id=-100123, chat_type="supergroup",
+        use_topics=False,
+    )
+
+
+@pytest.fixture
+def sample_issue():
+    return Issue(id=1, number=42, repo="owner/repo", title="Fix bug", body="")
+
+
+@pytest.mark.asyncio
+async def test_resolve_thread_creates_topic_on_first_call(topics_config, state_store, sample_issue):
+    bot = TelegramBot(topics_config, store=state_store)
+    with patch.object(
+        bot._api, "create_forum_topic",
+        new_callable=AsyncMock,
+        return_value={"message_thread_id": 555, "name": "owner/repo"},
+    ):
+        thread_id = await bot._resolve_thread_id(sample_issue.repo)
+    assert thread_id == 555
+    stored = await state_store.get_thread_id("owner/repo")
+    assert stored == 555
+
+
+@pytest.mark.asyncio
+async def test_resolve_thread_reuses_stored_id(topics_config, state_store, sample_issue):
+    await state_store.store_thread_id("owner/repo", 888)
+    bot = TelegramBot(topics_config, store=state_store)
+    thread_id = await bot._resolve_thread_id(sample_issue.repo)
+    assert thread_id == 888
+
+
+@pytest.mark.asyncio
+async def test_resolve_thread_returns_none_when_topics_disabled(no_topics_config, state_store, sample_issue):
+    bot = TelegramBot(no_topics_config, store=state_store)
+    thread_id = await bot._resolve_thread_id(sample_issue.repo)
+    assert thread_id is None
+
+
+@pytest.mark.asyncio
+async def test_notify_completion_sends_to_thread(topics_config, state_store, sample_issue):
+    await state_store.store_thread_id("owner/repo", 555)
+    bot = TelegramBot(topics_config, store=state_store)
+    with patch.object(bot._outbox, "enqueue_send", new_callable=AsyncMock) as mock_send:
+        mock_future = asyncio.get_event_loop().create_future()
+        mock_future.set_result(None)
+        mock_send.return_value = mock_future
+        await bot.notify_completion(sample_issue, "https://github.com/pr/1")
+    call_kwargs = mock_send.call_args
+    assert call_kwargs.kwargs.get("message_thread_id") == 555
+
+
+@pytest.mark.asyncio
+async def test_notify_completion_no_thread_when_disabled(no_topics_config, state_store, sample_issue):
+    bot = TelegramBot(no_topics_config, store=state_store)
+    with patch.object(bot._outbox, "enqueue_send", new_callable=AsyncMock) as mock_send:
+        mock_future = asyncio.get_event_loop().create_future()
+        mock_future.set_result(None)
+        mock_send.return_value = mock_future
+        await bot.notify_completion(sample_issue, "https://github.com/pr/1")
+    call_kwargs = mock_send.call_args
+    assert "message_thread_id" not in call_kwargs.kwargs
+
+
 @pytest.mark.asyncio
 async def test_telegram_client_forwards_message_thread_id(bot_client):
     """TelegramClient (rate-limited wrapper) must forward message_thread_id to HttpBotClient."""

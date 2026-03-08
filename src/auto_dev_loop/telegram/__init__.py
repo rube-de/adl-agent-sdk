@@ -9,6 +9,7 @@ from dataclasses import dataclass
 import msgspec
 
 from ..models import Issue, StageState, TelegramConfig
+from ..state import StateStore
 from ..workflow_loader import WorkflowConfig, StageConfig
 from .bot_api import HttpBotClient
 from .callbacks import decode_callback
@@ -43,7 +44,7 @@ class HumanDecision:
 class TelegramBot:
     """Facade for all Telegram operations. Start once, use everywhere."""
 
-    def __init__(self, config: TelegramConfig):
+    def __init__(self, config: TelegramConfig, store: StateStore | None = None):
         self._config = config
         self._api = HttpBotClient(config.bot_token)
         client = TelegramClient(self._api, chat_type=config.chat_type)
@@ -52,6 +53,35 @@ class TelegramBot:
         self._chat_id = config.chat_id
         self._progress_messages: dict[int, int] = {}
         self._tasks: list[asyncio.Task] = []
+        self._store = store
+        self._thread_cache: dict[str, int] = {}
+
+    async def _resolve_thread_id(self, repo: str) -> int | None:
+        """Return the forum topic thread ID for *repo*, or None if topics disabled."""
+        if not self._config.use_topics:
+            return None
+        if repo in self._thread_cache:
+            return self._thread_cache[repo]
+        if self._store:
+            stored = await self._store.get_thread_id(repo)
+            if stored is not None:
+                self._thread_cache[repo] = stored
+                return stored
+        result = await self._api.create_forum_topic(self._chat_id, repo)
+        thread_id = result["message_thread_id"]
+        self._thread_cache[repo] = thread_id
+        if self._store:
+            await self._store.store_thread_id(repo, thread_id)
+        return thread_id
+
+    async def _thread_kwargs(self, issue: Issue | None) -> dict:
+        """Return {"message_thread_id": N} if topics enabled, else {}."""
+        if issue is None or not self._config.use_topics:
+            return {}
+        thread_id = await self._resolve_thread_id(issue.repo)
+        if thread_id is not None:
+            return {"message_thread_id": thread_id}
+        return {}
 
     async def start(self) -> None:
         """Launch background drain + poll loops."""
@@ -77,15 +107,16 @@ class TelegramBot:
     ) -> None:
         """Send or update the progress card for an issue."""
         text = build_progress_message(issue, workflow, stage_states, total_elapsed)
+        tkw = await self._thread_kwargs(issue)
 
         if issue.id in self._progress_messages:
             msg_id = self._progress_messages[issue.id]
             await self._outbox.enqueue_edit(
-                self._chat_id, msg_id, text, parse_mode="HTML",
+                self._chat_id, msg_id, text, parse_mode="HTML", **tkw,
             )
         else:
             future = await self._outbox.enqueue_send(
-                self._chat_id, text, parse_mode="HTML",
+                self._chat_id, text, parse_mode="HTML", **tkw,
             )
             try:
                 msg = await future
@@ -106,6 +137,7 @@ class TelegramBot:
     ) -> HumanDecision:
         """Send escalation with inline buttons, block until human responds or timeout."""
         text, keyboard = build_escalation_message(issue, stage, verdict, reason)
+        tkw = await self._thread_kwargs(issue)
 
         future = await self._outbox.enqueue_send(
             self._chat_id, text,
@@ -113,6 +145,7 @@ class TelegramBot:
                 msgspec.json.encode(keyboard), type=dict,
             ),
             parse_mode="HTML",
+            **tkw,
         )
         try:
             msg = await future
@@ -142,6 +175,7 @@ class TelegramBot:
                     self._chat_id, msg.message_id,
                     text + "\n\n<i>Reply to this message with your feedback...</i>",
                     parse_mode="HTML",
+                    **tkw,
                 )
             elif not decision.done():
                 decision.set_result(HumanDecision(action=action))
@@ -168,12 +202,14 @@ class TelegramBot:
 
     async def notify_completion(self, issue: Issue, pr_url: str) -> None:
         text = build_completion_message(issue, pr_url)
-        future = await self._outbox.enqueue_send(self._chat_id, text, parse_mode="HTML")
+        tkw = await self._thread_kwargs(issue)
+        future = await self._outbox.enqueue_send(self._chat_id, text, parse_mode="HTML", **tkw)
         future.add_done_callback(_suppress_exception)
 
     async def notify_error(self, issue: Issue, error: str) -> None:
         text = build_error_message(issue, error)
-        future = await self._outbox.enqueue_send(self._chat_id, text, parse_mode="HTML")
+        tkw = await self._thread_kwargs(issue)
+        future = await self._outbox.enqueue_send(self._chat_id, text, parse_mode="HTML", **tkw)
         future.add_done_callback(_suppress_exception)
 
     async def notify_security(
@@ -185,7 +221,8 @@ class TelegramBot:
         if not blocked_commands:
             return
         text = build_security_message(issue, blocked_commands)
-        future = await self._outbox.enqueue_send(self._chat_id, text, parse_mode="HTML")
+        tkw = await self._thread_kwargs(issue)
+        future = await self._outbox.enqueue_send(self._chat_id, text, parse_mode="HTML", **tkw)
         future.add_done_callback(_suppress_exception)
 
     def clear_progress(self, issue_id: int) -> None:
