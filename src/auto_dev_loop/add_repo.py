@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess  # nosec B404 — subprocess used with hardcoded args only
+from importlib.resources.abc import Traversable
 from pathlib import Path
 from typing import Any
 
@@ -19,9 +19,10 @@ class AddRepoError(Exception):
     pass
 
 
-def scaffold_files(source_dir: Path, target_dir: Path) -> list[str]:
+def scaffold_files(source_dir: Path | Traversable, target_dir: Path) -> list[str]:
     """Copy files from source_dir into target_dir, skipping existing.
 
+    Uses read_bytes/write_bytes for Traversable compatibility (zip archives, wheels).
     Returns list of filenames that were actually copied.
     """
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -32,7 +33,7 @@ def scaffold_files(source_dir: Path, target_dir: Path) -> list[str]:
         dest = target_dir / src_file.name
         if dest.exists():
             continue
-        shutil.copy2(src_file, dest)
+        dest.write_bytes(src_file.read_bytes())
         copied.append(src_file.name)
     return copied
 
@@ -63,7 +64,9 @@ def is_repo_configured(config_path: Path, repo_path: Path) -> bool:
     for entry in data.get("repos", []):
         if not isinstance(entry, dict):
             continue
-        existing = entry.get("path", "")
+        existing = entry.get("path")
+        if not isinstance(existing, str) or not existing:
+            continue
         if str(Path(existing).expanduser().resolve()) == target:
             return True
     return False
@@ -116,12 +119,15 @@ def check_gh_available() -> None:
             "Install from https://cli.github.com/"
         ) from exc
 
-    result = subprocess.run(  # nosec B603 B607
-        ["gh", "auth", "status"],
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
+    try:
+        result = subprocess.run(  # nosec B603 B607
+            ["gh", "auth", "status"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise AddRepoError("GitHub CLI timed out checking auth status.") from exc
     if result.returncode != 0:
         raise AddRepoError(
             "GitHub CLI is not authenticated. Run `gh auth login` first."
@@ -275,13 +281,23 @@ def _prompt_columns(options: list[str]) -> dict[str, str]:
             return defaults
 
     typer.echo("Map project columns:")
-    while True:
+    max_attempts = 5
+    for attempt in range(max_attempts):
         columns = {}
         for role in ("source", "in_progress", "done"):
             columns[role] = _prompt_column(role, options, defaults.get(role))
         if len(set(columns.values())) == 3:
             return columns
+        if len(set(options)) < 3:
+            typer.echo(
+                f"  Only {len(set(options))} distinct options available — "
+                "cannot map 3 unique columns. Use custom column names.",
+                err=True,
+            )
+            raise typer.Exit(1)
         typer.echo("  Each role must map to a different column. Please try again.")
+    typer.echo("  Too many invalid attempts.", err=True)
+    raise typer.Exit(1)
 
 
 def _prompt_project(projects: list[dict[str, Any]]) -> dict[str, Any]:
@@ -319,11 +335,21 @@ def run_add_wizard(
         raise typer.Exit(1)
 
     # 3. Check for duplicates
-    if is_repo_configured(config_path, resolved):
+    try:
+        already_configured = is_repo_configured(config_path, resolved)
+    except AddRepoError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+
+    if already_configured:
         typer.echo(f"Repository {resolved} is already configured.")
         if not typer.confirm("Reconfigure?", default=False):
             raise typer.Exit(0)
-        _remove_repo_config(config_path, resolved)
+        try:
+            _remove_repo_config(config_path, resolved)
+        except AddRepoError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(1) from exc
 
     # 4. Check gh CLI
     try:
@@ -374,20 +400,24 @@ def run_add_wizard(
     else:
         typer.echo("No Status field found.")
         typer.echo("Enter the names of the three status columns in your project.")
-        columns = {
-            "source": typer.prompt(
-                "Column name for items ready for development",
-                default="Ready for Dev",
-            ),
-            "in_progress": typer.prompt(
-                "Column name for items in progress",
-                default="In Progress",
-            ),
-            "done": typer.prompt(
-                "Column name for completed items",
-                default="Done",
-            ),
-        }
+        while True:
+            columns = {
+                "source": typer.prompt(
+                    "Column name for items ready for development",
+                    default="Ready for Dev",
+                ),
+                "in_progress": typer.prompt(
+                    "Column name for items in progress",
+                    default="In Progress",
+                ),
+                "done": typer.prompt(
+                    "Column name for completed items",
+                    default="Done",
+                ),
+            }
+            if len(set(columns.values())) == 3:
+                break
+            typer.echo("  Each role must map to a different column. Please try again.")
 
     # 8. Scaffold agents and workflows
     agents_copied = scaffold_files(BUNDLED_AGENTS_DIR, resolved / "agents")
@@ -404,8 +434,13 @@ def run_add_wizard(
         "path": str(resolved),
         "project_number": project["number"],
         "owner": owner,
+        "repo": repo,
         "columns": columns,
     }
-    append_repo_config(config_path, entry)
+    try:
+        append_repo_config(config_path, entry)
+    except AddRepoError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
 
     typer.echo(f"Added {owner}/{repo}. Run `adl run` to start processing.")

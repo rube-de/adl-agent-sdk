@@ -144,6 +144,7 @@ class RepoConfig:
         "done": "Done",
     })
     owner: str | None = None
+    repo: str | None = None
 
 
 @dataclass

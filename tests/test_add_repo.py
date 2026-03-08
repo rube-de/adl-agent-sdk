@@ -11,6 +11,7 @@ import yaml
 
 from auto_dev_loop.add_repo import (
     AddRepoError,
+    _remove_repo_config,
     append_repo_config,
     check_gh_available,
     detect_column_defaults,
@@ -439,3 +440,89 @@ class TestRunAddWizard:
         with pytest.raises(typer.Exit) as exc_info:
             run_add_wizard(repo_path, cfg_path)
         assert exc_info.value.exit_code == 0
+
+    @patch("auto_dev_loop.add_repo.check_gh_available")
+    @patch("auto_dev_loop.add_repo.detect_github_remote")
+    @patch("auto_dev_loop.add_repo.list_gh_projects")
+    @patch("auto_dev_loop.add_repo.list_status_options")
+    @patch("auto_dev_loop.add_repo.scaffold_files")
+    @patch("auto_dev_loop.add_repo._remove_repo_config", wraps=_remove_repo_config)
+    def test_reconfigure_replaces_existing_entry(
+        self,
+        mock_remove,
+        mock_scaffold,
+        mock_status,
+        mock_projects,
+        mock_detect,
+        mock_gh_check,
+        tmp_path: Path,
+        monkeypatch,
+    ):
+        repo_path = tmp_path / "my-app"
+        repo_path.mkdir()
+        (repo_path / ".git").mkdir()
+        cfg_path = tmp_path / "config.yaml"
+        data = _minimal_config()
+        data["repos"] = [{"path": str(repo_path), "project_number": 1, "owner": "old"}]
+        _write_config(cfg_path, data)
+
+        mock_detect.return_value = ("acme", "my-app")
+        mock_projects.return_value = [{"number": 5, "title": "New Board"}]
+        mock_status.return_value = ["Todo", "In Progress", "Done"]
+        mock_scaffold.return_value = []
+
+        confirm_values = iter([True, True])  # Reconfigure? -> Yes, Use columns? -> Yes
+
+        def fake_confirm(*args, **kwargs):
+            return next(confirm_values)
+
+        monkeypatch.setattr("auto_dev_loop.add_repo.typer.confirm", fake_confirm)
+
+        run_add_wizard(repo_path, cfg_path)
+
+        mock_remove.assert_called_once_with(cfg_path, repo_path.resolve())
+        result = load_config_raw(cfg_path)
+        assert len(result["repos"]) == 1
+        entry = result["repos"][0]
+        assert entry["project_number"] == 5
+        assert entry["owner"] == "acme"
+
+    @patch("auto_dev_loop.add_repo.check_gh_available")
+    @patch("auto_dev_loop.add_repo.detect_github_remote")
+    @patch("auto_dev_loop.add_repo.list_gh_projects")
+    @patch("auto_dev_loop.add_repo.list_status_options")
+    @patch("auto_dev_loop.add_repo.scaffold_files")
+    def test_no_status_field_prompts_manual_columns(
+        self,
+        mock_scaffold,
+        mock_status,
+        mock_projects,
+        mock_detect,
+        mock_gh_check,
+        tmp_path: Path,
+        monkeypatch,
+    ):
+        cfg_path, repo_path = _setup_wizard_env(tmp_path)
+
+        mock_detect.return_value = ("acme", "my-app")
+        mock_projects.return_value = [{"number": 2, "title": "Board"}]
+        mock_status.return_value = []  # no Status field
+        mock_scaffold.return_value = []
+
+        prompt_values = iter(["Backlog", "Working", "Shipped"])
+
+        def fake_prompt(*args, **kwargs):
+            return next(prompt_values)
+
+        monkeypatch.setattr("auto_dev_loop.add_repo.typer.prompt", fake_prompt)
+
+        run_add_wizard(repo_path, cfg_path)
+
+        result = load_config_raw(cfg_path)
+        assert len(result["repos"]) == 1
+        entry = result["repos"][0]
+        assert entry["columns"] == {
+            "source": "Backlog",
+            "in_progress": "Working",
+            "done": "Shipped",
+        }
