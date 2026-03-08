@@ -187,6 +187,8 @@ def detect_github_remote(repo_path: Path) -> tuple[str, str]:
         )
     except subprocess.TimeoutExpired as exc:
         raise AddRepoError("GitHub CLI timed out detecting remote. Check your network.") from exc
+    except FileNotFoundError as exc:
+        raise AddRepoError("GitHub CLI (gh) is not available.") from exc
     if result.returncode != 0:
         raise AddRepoError(
             f"Could not detect GitHub remote: {result.stderr.strip()}\n"
@@ -210,6 +212,8 @@ def list_gh_projects(owner: str) -> list[dict[str, Any]]:
         )
     except subprocess.TimeoutExpired as exc:
         raise AddRepoError(f"GitHub CLI timed out listing projects for {owner}.") from exc
+    except FileNotFoundError as exc:
+        raise AddRepoError("GitHub CLI (gh) is not available.") from exc
     if result.returncode != 0:
         raise AddRepoError(
             f"Could not list projects for {owner}: {result.stderr.strip()}"
@@ -249,6 +253,8 @@ def list_status_options(owner: str, project_number: int) -> list[str]:
         )
     except subprocess.TimeoutExpired as exc:
         raise AddRepoError("GitHub CLI timed out listing project fields.") from exc
+    except FileNotFoundError as exc:
+        raise AddRepoError("GitHub CLI (gh) is not available.") from exc
     if result.returncode != 0:
         raise AddRepoError(f"Could not list project fields: {result.stderr.strip()}")
     try:
@@ -329,7 +335,7 @@ def _prompt_columns(options: list[str]) -> dict[str, str]:
 
     typer.echo("Map project columns:")
     max_attempts = 5
-    for attempt in range(max_attempts):
+    for _attempt in range(max_attempts):
         columns = {}
         for role in ("source", "in_progress", "done"):
             columns[role] = _prompt_column(role, options, defaults.get(role))
