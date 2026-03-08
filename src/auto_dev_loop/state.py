@@ -197,7 +197,8 @@ class StateStore:
     async def store_thread_id(self, repo: str, thread_id: int) -> None:
         """Persist the Telegram forum topic thread ID for *repo*."""
         await self._db.execute(
-            "INSERT OR REPLACE INTO telegram_threads (repo, thread_id) VALUES (?, ?)",
+            """INSERT INTO telegram_threads (repo, thread_id) VALUES (?, ?)
+               ON CONFLICT(repo) DO UPDATE SET thread_id = excluded.thread_id""",
             (repo, thread_id),
         )
         await self._db.commit()

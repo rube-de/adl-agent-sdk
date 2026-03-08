@@ -11,7 +11,7 @@ from auto_dev_loop.models import Issue, TelegramConfig
 from auto_dev_loop.state import StateStore
 from auto_dev_loop.telegram import TelegramBot
 from auto_dev_loop.telegram.bot_api import HttpBotClient
-from auto_dev_loop.telegram.models import BotApiResponse, Chat, Message
+from auto_dev_loop.telegram.models import BotApiError, BotApiResponse, Chat, ForumTopic, Message
 
 
 # --- TelegramConfig model tests ---
@@ -74,14 +74,27 @@ def bot_client():
 async def test_create_forum_topic(bot_client):
     mock_resp = BotApiResponse(
         ok=True,
-        result=msgspec.json.encode({"message_thread_id": 999, "name": "owner/repo"}),
+        result=msgspec.json.encode(ForumTopic(message_thread_id=999, name="owner/repo")),
     )
     with patch.object(bot_client, "call", new_callable=AsyncMock, return_value=mock_resp):
         result = await bot_client.create_forum_topic(chat_id=-100123, name="owner/repo")
-        assert result["message_thread_id"] == 999
+        assert result.message_thread_id == 999
         bot_client.call.assert_awaited_once_with(
             "createForumTopic", chat_id=-100123, name="owner/repo",
         )
+
+
+@pytest.mark.asyncio
+async def test_create_forum_topic_truncates_long_name(bot_client):
+    long_name = "a" * 200
+    mock_resp = BotApiResponse(
+        ok=True,
+        result=msgspec.json.encode(ForumTopic(message_thread_id=1, name=long_name[:128])),
+    )
+    with patch.object(bot_client, "call", new_callable=AsyncMock, return_value=mock_resp):
+        await bot_client.create_forum_topic(chat_id=-100123, name=long_name)
+        call_kwargs = bot_client.call.call_args
+        assert len(call_kwargs.kwargs["name"]) == 128
 
 
 @pytest.mark.asyncio
@@ -113,7 +126,8 @@ async def test_send_message_without_thread_id(bot_client):
 
 
 @pytest.mark.asyncio
-async def test_edit_message_text_with_thread_id(bot_client):
+async def test_edit_message_text_no_thread_id(bot_client):
+    """editMessageText does not accept message_thread_id per Telegram Bot API."""
     mock_msg = Message(message_id=1, chat=Chat(id=-100123, type="supergroup"))
     mock_resp = BotApiResponse(
         ok=True,
@@ -121,10 +135,10 @@ async def test_edit_message_text_with_thread_id(bot_client):
     )
     with patch.object(bot_client, "call", new_callable=AsyncMock, return_value=mock_resp):
         await bot_client.edit_message_text(
-            chat_id=-100123, message_id=1, text="updated", message_thread_id=999,
+            chat_id=-100123, message_id=1, text="updated",
         )
         call_kwargs = bot_client.call.call_args
-        assert call_kwargs.kwargs["message_thread_id"] == 999
+        assert "message_thread_id" not in call_kwargs.kwargs
 
 
 # --- TelegramClient passthrough test ---
@@ -185,7 +199,7 @@ async def test_resolve_thread_creates_topic_on_first_call(topics_config, state_s
     with patch.object(
         bot._api, "create_forum_topic",
         new_callable=AsyncMock,
-        return_value={"message_thread_id": 555, "name": "owner/repo"},
+        return_value=ForumTopic(message_thread_id=555, name="owner/repo"),
     ):
         thread_id = await bot._resolve_thread_id(sample_issue.repo)
     assert thread_id == 555
@@ -249,7 +263,7 @@ async def test_full_round_trip_topic_creation_and_reuse(topics_config, state_sto
         patch.object(
             bot._api, "create_forum_topic",
             new_callable=AsyncMock,
-            return_value={"message_thread_id": 777, "name": "owner/repo"},
+            return_value=ForumTopic(message_thread_id=777, name="owner/repo"),
         ) as mock_create,
         patch.object(
             bot._outbox, "enqueue_send",
@@ -311,3 +325,36 @@ async def test_escalate_sends_to_thread(topics_config, state_store, sample_issue
                 timeout=0.1,
             )
         assert mock_send.call_args.kwargs.get("message_thread_id") == 555
+
+
+@pytest.mark.asyncio
+async def test_resolve_thread_is_race_free(topics_config, state_store, sample_issue):
+    """Concurrent calls to resolve a new thread ID only create one topic."""
+    bot = TelegramBot(topics_config, store=state_store)
+    with patch.object(
+        bot._api, "create_forum_topic",
+        new_callable=AsyncMock,
+        return_value=ForumTopic(message_thread_id=555, name="owner/repo"),
+    ) as mock_create:
+        results = await asyncio.gather(
+            bot._resolve_thread_id(sample_issue.repo),
+            bot._resolve_thread_id(sample_issue.repo),
+        )
+    assert mock_create.await_count == 1
+    assert results == [555, 555]
+
+
+@pytest.mark.asyncio
+async def test_resolve_thread_returns_none_on_api_failure(topics_config, state_store, sample_issue):
+    """When create_forum_topic fails, _resolve_thread_id returns None gracefully."""
+    bot = TelegramBot(topics_config, store=state_store)
+    with patch.object(
+        bot._api, "create_forum_topic",
+        new_callable=AsyncMock,
+        side_effect=BotApiError(400, "Bad Request: not enough rights"),
+    ):
+        thread_id = await bot._resolve_thread_id(sample_issue.repo)
+    assert thread_id is None
+    # Subsequent call should return cached None without calling API again
+    thread_id2 = await bot._resolve_thread_id(sample_issue.repo)
+    assert thread_id2 is None
