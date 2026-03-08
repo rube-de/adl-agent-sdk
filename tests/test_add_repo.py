@@ -536,3 +536,4 @@ class TestRunAddWizard:
             "in_progress": "Working",
             "done": "Shipped",
         }
+        assert entry["repo"] == "my-app"

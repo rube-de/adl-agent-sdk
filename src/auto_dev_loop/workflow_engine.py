@@ -13,6 +13,9 @@ from dataclasses import dataclass
 
 from .models import (
     APPROVED_MARKERS,
+    VERDICT_BLOCKED,
+    VERDICT_CLARIFICATION_NEEDED,
+    VERDICT_MAX_ITERATIONS,
     VERDICT_NEEDS_REVISION,
     VERDICT_VETOED,
     Issue,
@@ -86,7 +89,7 @@ def evaluate_condition(condition: str, issue: Issue) -> bool:
 
 @dataclass
 class Verdict:
-    status: str  # "approved", "completed", "needs_revision", "vetoed"
+    status: str  # "approved", "completed", "needs_revision", "vetoed", "blocked", "clarification_needed", "max_iterations"
     feedback: str | None = None
 
 
@@ -107,8 +110,12 @@ def _parse_verdict(output: str, *, strict: bool = False) -> Verdict:
             return Verdict(status="needs_revision", feedback=rv.feedback)
         if line == VERDICT_VETOED:
             return Verdict(status="vetoed", feedback=output)
-        # TODO(#35): Handle VERDICT_BLOCKED, VERDICT_CLARIFICATION_NEEDED,
-        # and VERDICT_MAX_ITERATIONS once state machine support is added.
+        if line == VERDICT_BLOCKED:
+            return Verdict(status="blocked", feedback=output)
+        if line == VERDICT_CLARIFICATION_NEEDED:
+            return Verdict(status="clarification_needed", feedback=output)
+        if line == VERDICT_MAX_ITERATIONS:
+            return Verdict(status="max_iterations", feedback=output)
 
     if strict:
         return Verdict(status="needs_revision", feedback="No verdict marker found in output")

@@ -10,6 +10,7 @@ from typing import Any
 
 import typer
 import yaml
+from ruamel.yaml import YAML
 
 from ._paths import ADL_CONFIG
 from .bundled import BUNDLED_AGENTS_DIR, BUNDLED_WORKFLOWS_DIR
@@ -17,6 +18,13 @@ from .bundled import BUNDLED_AGENTS_DIR, BUNDLED_WORKFLOWS_DIR
 
 class AddRepoError(Exception):
     pass
+
+
+def _roundtrip_yaml() -> YAML:
+    """Create a round-trip YAML instance that preserves comments and formatting."""
+    rt = YAML()
+    rt.preserve_quotes = True
+    return rt
 
 
 def scaffold_files(source_dir: Path | Traversable, target_dir: Path) -> list[str]:
@@ -74,7 +82,10 @@ def is_repo_configured(config_path: Path, repo_path: Path) -> bool:
 
 def _remove_repo_config(config_path: Path, repo_path: Path) -> None:
     """Remove an existing repo entry from config by resolved path."""
-    data = load_config_raw(config_path)
+    rt = _roundtrip_yaml()
+    data = rt.load(config_path)
+    if data is None:
+        data = {}
     target = str(repo_path.resolve())
     repos = data.get("repos") or []
     if not isinstance(repos, list):
@@ -89,12 +100,15 @@ def _remove_repo_config(config_path: Path, repo_path: Path) -> None:
             and str(Path(r["path"]).expanduser().resolve()) == target
         )
     ]
-    config_path.write_text(yaml.safe_dump(data, sort_keys=False))
+    rt.dump(data, config_path)
 
 
 def append_repo_config(config_path: Path, entry: dict[str, Any]) -> None:
     """Append a repo entry to the config's repos list and write back."""
-    data = load_config_raw(config_path)
+    rt = _roundtrip_yaml()
+    data = rt.load(config_path)
+    if data is None:
+        data = {}
     repos = data.get("repos") or []
     if not isinstance(repos, list):
         raise AddRepoError(
@@ -102,7 +116,7 @@ def append_repo_config(config_path: Path, entry: dict[str, Any]) -> None:
         )
     repos.append(entry)
     data["repos"] = repos
-    config_path.write_text(yaml.safe_dump(data, sort_keys=False))
+    rt.dump(data, config_path)
 
 
 def check_gh_available() -> None:
@@ -132,6 +146,11 @@ def check_gh_available() -> None:
         )
     except subprocess.TimeoutExpired as exc:
         raise AddRepoError("GitHub CLI timed out checking auth status.") from exc
+    except FileNotFoundError as exc:
+        raise AddRepoError(
+            "GitHub CLI (gh) is not available. "
+            "Install from https://cli.github.com/"
+        ) from exc
     if result.returncode != 0:
         raise AddRepoError(
             "GitHub CLI is not authenticated. Run `gh auth login` first."
@@ -187,6 +206,8 @@ def list_gh_projects(owner: str) -> list[dict[str, Any]]:
         raise AddRepoError(
             f"Could not parse project list response: {exc}"
         ) from exc
+    if not isinstance(data, dict):
+        raise AddRepoError("Unexpected project list response format (expected JSON object).")
     return data.get("projects", [])
 
 
@@ -222,6 +243,8 @@ def list_status_options(owner: str, project_number: int) -> list[str]:
         raise AddRepoError(
             f"Could not parse project fields response: {exc}"
         ) from exc
+    if not isinstance(data, dict):
+        raise AddRepoError("Unexpected project fields response format (expected JSON object).")
     for field in data.get("fields", []):
         if (
             field.get("name") == "Status"
@@ -308,19 +331,19 @@ def _prompt_project(projects: list[dict[str, Any]]) -> dict[str, Any]:
     """Prompt user to select a project from the list."""
     if len(projects) == 1:
         project = projects[0]
-        typer.echo(f"Using project #{project['number']} - {project['title']}")
+        typer.echo(f"Using project #{project.get('number', '?')} - {project.get('title', '(untitled)')}")
         return project
 
     typer.echo("Available projects:")
     for i, p in enumerate(projects, 1):
-        typer.echo(f"  {i}. #{p['number']} - {p['title']}")
+        typer.echo(f"  {i}. #{p.get('number', '?')} - {p.get('title', '(untitled)')}")
     idx = typer.prompt("Select project (menu index or project number)", type=int)
     # Try as 1-based menu index first
     if 1 <= idx <= len(projects):
         return projects[idx - 1]
     # Try as a project number
     for p in projects:
-        if p["number"] == idx:
+        if p.get("number") == idx:
             return p
     raise AddRepoError(f"Invalid selection: {idx}")
 
@@ -339,6 +362,9 @@ def run_add_wizard(
 
     # 2. Resolve repo path (supports worktrees, submodules, and subdirs)
     candidate = (repo_path or Path.cwd()).resolve()
+    if not candidate.exists():
+        typer.echo(f"{candidate} does not exist.", err=True)
+        raise typer.Exit(1)
     if (candidate / ".git").exists():
         # .git dir (normal repo) or .git file (worktree/submodule)
         resolved = candidate
