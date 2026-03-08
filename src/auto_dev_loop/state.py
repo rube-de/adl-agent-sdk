@@ -68,6 +68,12 @@ class StateStore:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(issue_id, workflow_id, stage_ref, iteration)
             );
+
+            CREATE TABLE IF NOT EXISTS telegram_threads (
+                repo TEXT PRIMARY KEY,
+                thread_id INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
         """)
         await self._db.commit()
 
@@ -178,3 +184,20 @@ class StateStore:
         )
         rows = await cursor.fetchall()
         return {f"{r['repo']}#{r['number']}" for r in rows}
+
+    async def get_thread_id(self, repo: str) -> int | None:
+        """Return the Telegram forum topic thread ID for *repo*, or None."""
+        cursor = await self._db.execute(
+            "SELECT thread_id FROM telegram_threads WHERE repo=?",
+            (repo,),
+        )
+        row = await cursor.fetchone()
+        return row["thread_id"] if row else None
+
+    async def store_thread_id(self, repo: str, thread_id: int) -> None:
+        """Persist the Telegram forum topic thread ID for *repo*."""
+        await self._db.execute(
+            "INSERT OR REPLACE INTO telegram_threads (repo, thread_id) VALUES (?, ?)",
+            (repo, thread_id),
+        )
+        await self._db.commit()

@@ -113,3 +113,30 @@ async def test_list_terminal_issue_keys(db: StateStore):
 async def test_list_terminal_issue_keys_empty(db: StateStore):
     keys = await db.list_terminal_issue_keys()
     assert keys == set()
+
+
+@pytest.mark.asyncio
+async def test_init_creates_telegram_threads_table(db: StateStore):
+    tables = await db.list_tables()
+    assert "telegram_threads" in tables
+
+
+@pytest.mark.asyncio
+async def test_get_thread_id_returns_none_for_unknown_repo(db: StateStore):
+    result = await db.get_thread_id("owner/unknown")
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_store_and_get_thread_id(db: StateStore):
+    await db.store_thread_id("owner/repo", 12345)
+    result = await db.get_thread_id("owner/repo")
+    assert result == 12345
+
+
+@pytest.mark.asyncio
+async def test_store_thread_id_is_idempotent(db: StateStore):
+    await db.store_thread_id("owner/repo", 111)
+    await db.store_thread_id("owner/repo", 222)
+    result = await db.get_thread_id("owner/repo")
+    assert result == 222
