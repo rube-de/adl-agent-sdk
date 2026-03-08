@@ -362,26 +362,38 @@ async def test_resolve_thread_returns_none_on_api_failure(topics_config, state_s
 
 @pytest.mark.asyncio
 async def test_resolve_thread_retries_after_rate_limit(topics_config, state_store, sample_issue):
-    """RetryAfter is transient — should NOT be cached, allowing retry on next call."""
+    """RetryAfter triggers a sleep + retry, succeeding on second attempt."""
     bot = TelegramBot(topics_config, store=state_store)
     with patch.object(
         bot._api, "create_forum_topic",
         new_callable=AsyncMock,
-        side_effect=RetryAfter(30),
-    ) as mock_create:
+        side_effect=[
+            RetryAfter(1),
+            ForumTopic(message_thread_id=555, name="owner/repo"),
+        ],
+    ) as mock_create, patch("auto_dev_loop.telegram.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
         thread_id = await bot._resolve_thread_id(sample_issue.repo)
-    assert thread_id is None
-    assert mock_create.await_count == 1
+    assert thread_id == 555
+    assert mock_create.await_count == 2
+    mock_sleep.assert_awaited_once_with(1)
 
-    # Second call should retry (not return cached None)
+
+@pytest.mark.asyncio
+async def test_resolve_thread_retry_fails_returns_none(topics_config, state_store, sample_issue):
+    """If the retry after rate-limit also fails, returns None without caching."""
+    bot = TelegramBot(topics_config, store=state_store)
     with patch.object(
         bot._api, "create_forum_topic",
         new_callable=AsyncMock,
-        return_value=ForumTopic(message_thread_id=555, name="owner/repo"),
-    ) as mock_create2:
-        thread_id2 = await bot._resolve_thread_id(sample_issue.repo)
-    assert thread_id2 == 555
-    assert mock_create2.await_count == 1
+        side_effect=[
+            RetryAfter(1),
+            BotApiError(403, "Forbidden"),
+        ],
+    ), patch("auto_dev_loop.telegram.asyncio.sleep", new_callable=AsyncMock):
+        thread_id = await bot._resolve_thread_id(sample_issue.repo)
+    assert thread_id is None
+    # Not cached — next call should try again
+    assert sample_issue.repo not in bot._thread_cache
 
 
 def test_use_topics_requires_state_store(topics_config):

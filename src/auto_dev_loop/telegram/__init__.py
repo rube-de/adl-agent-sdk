@@ -84,10 +84,20 @@ class TelegramBot:
                 return thread_id
             except RetryAfter as exc:
                 log.warning(
-                    "Rate-limited creating forum topic for %s, will retry next notification: %s",
-                    repo, exc,
+                    "Rate-limited creating topic for %s, retrying after %ss",
+                    repo, exc.retry_after,
                 )
-                return None
+                await asyncio.sleep(exc.retry_after)
+                try:
+                    result = await self._api.create_forum_topic(self._chat_id, repo)
+                    thread_id = result.message_thread_id
+                    self._thread_cache[repo] = thread_id
+                    if self._store:
+                        await self._store.store_thread_id(repo, thread_id)
+                    return thread_id
+                except Exception as retry_exc:
+                    log.warning("Retry failed for %s: %s", repo, retry_exc)
+                    return None
             except (BotApiError, httpx.HTTPError, OSError) as exc:
                 log.warning(
                     "Failed to create forum topic for %s, sending without topic: %s",
