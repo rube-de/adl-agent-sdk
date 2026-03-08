@@ -225,3 +225,55 @@ async def test_telegram_client_forwards_message_thread_id(bot_client):
         await client.send_message(chat_id=-100123, text="hi", message_thread_id=777)
         call_kwargs = bot_client.call.call_args
         assert call_kwargs.kwargs["message_thread_id"] == 777
+
+
+@pytest.mark.asyncio
+async def test_full_round_trip_topic_creation_and_reuse(topics_config, state_store, sample_issue):
+    """Integration: first message creates topic, second reuses it."""
+    bot = TelegramBot(topics_config, store=state_store)
+
+    mock_msg = Message(message_id=10, chat=Chat(id=-100123, type="supergroup"))
+    mock_future = asyncio.get_event_loop().create_future()
+    mock_future.set_result(mock_msg)
+
+    with (
+        patch.object(
+            bot._api, "create_forum_topic",
+            new_callable=AsyncMock,
+            return_value={"message_thread_id": 777, "name": "owner/repo"},
+        ) as mock_create,
+        patch.object(
+            bot._outbox, "enqueue_send",
+            new_callable=AsyncMock,
+            return_value=mock_future,
+        ) as mock_send,
+    ):
+        # First call — creates topic
+        await bot.notify_completion(sample_issue, "https://github.com/pr/1")
+        assert mock_create.await_count == 1
+        assert mock_send.call_args.kwargs["message_thread_id"] == 777
+
+        # Second call — reuses cached thread ID (no new topic created)
+        mock_future2 = asyncio.get_event_loop().create_future()
+        mock_future2.set_result(None)
+        mock_send.return_value = mock_future2
+        await bot.notify_error(sample_issue, "oops")
+        assert mock_create.await_count == 1  # still 1, not 2
+        assert mock_send.call_args.kwargs["message_thread_id"] == 777
+
+    # Verify DB persistence
+    stored = await state_store.get_thread_id("owner/repo")
+    assert stored == 777
+
+
+@pytest.mark.asyncio
+async def test_topics_disabled_sends_no_thread_id(no_topics_config, state_store, sample_issue):
+    """When use_topics=False, no message_thread_id is sent."""
+    bot = TelegramBot(no_topics_config, store=state_store)
+
+    mock_future = asyncio.get_event_loop().create_future()
+    mock_future.set_result(None)
+
+    with patch.object(bot._outbox, "enqueue_send", new_callable=AsyncMock, return_value=mock_future) as mock_send:
+        await bot.notify_completion(sample_issue, "https://github.com/pr/1")
+    assert "message_thread_id" not in mock_send.call_args.kwargs
