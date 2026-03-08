@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import shutil
-import subprocess
+import subprocess  # nosec B404 — subprocess used with hardcoded args only
 from pathlib import Path
 from typing import Any
 
@@ -101,7 +101,7 @@ def append_repo_config(config_path: Path, entry: dict[str, Any]) -> None:
 def check_gh_available() -> None:
     """Verify that the GitHub CLI is installed and authenticated."""
     try:
-        subprocess.run(
+        subprocess.run(  # nosec B603 B607
             ["gh", "--version"],
             capture_output=True,
             text=True,
@@ -116,7 +116,7 @@ def check_gh_available() -> None:
             "Install from https://cli.github.com/"
         ) from exc
 
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603 B607
         ["gh", "auth", "status"],
         capture_output=True,
         text=True,
@@ -135,7 +135,7 @@ def detect_github_remote(repo_path: Path) -> tuple[str, str]:
     Returns (owner, repo_name).
     """
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 B607
             ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
             capture_output=True,
             text=True,
@@ -159,7 +159,7 @@ def detect_github_remote(repo_path: Path) -> tuple[str, str]:
 def list_gh_projects(owner: str) -> list[dict[str, Any]]:
     """List GitHub Projects V2 for an owner."""
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 B607
             ["gh", "project", "list", "--owner", owner, "--format", "json"],
             capture_output=True,
             text=True,
@@ -187,7 +187,7 @@ def list_status_options(owner: str, project_number: int) -> list[str]:
     Returns empty list if no Status field is found.
     """
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 B607
             [
                 "gh",
                 "project",
