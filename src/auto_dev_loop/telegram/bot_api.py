@@ -28,16 +28,20 @@ class HttpBotClient:
     async def send_message(
         self, chat_id: int, text: str,
         reply_markup: dict | None = None, parse_mode: str = "HTML",
+        message_thread_id: int | None = None,
     ) -> Message:
         params = {"chat_id": chat_id, "text": text, "parse_mode": parse_mode}
         if reply_markup:
             params["reply_markup"] = reply_markup
+        if message_thread_id is not None:
+            params["message_thread_id"] = message_thread_id
         resp = await self.call("sendMessage", **params)
         return msgspec.json.decode(resp.result, type=Message)
 
     async def edit_message_text(
         self, chat_id: int, message_id: int, text: str,
         reply_markup: dict | None = None, parse_mode: str = "HTML",
+        message_thread_id: int | None = None,
     ) -> Message:
         params = {
             "chat_id": chat_id, "message_id": message_id,
@@ -45,8 +49,15 @@ class HttpBotClient:
         }
         if reply_markup:
             params["reply_markup"] = reply_markup
+        if message_thread_id is not None:
+            params["message_thread_id"] = message_thread_id
         resp = await self.call("editMessageText", **params)
         return msgspec.json.decode(resp.result, type=Message)
+
+    async def create_forum_topic(self, chat_id: int, name: str) -> dict:
+        """Create a forum topic in a supergroup. Returns dict with message_thread_id."""
+        resp = await self.call("createForumTopic", chat_id=chat_id, name=name)
+        return msgspec.json.decode(resp.result, type=dict)
 
     async def delete_message(self, chat_id: int, message_id: int) -> bool:
         await self.call("deleteMessage", chat_id=chat_id, message_id=message_id)
