@@ -97,16 +97,16 @@ class TelegramBot:
                     return thread_id
                 except Exception as retry_exc:
                     log.warning("Retry failed for %s: %s", repo, retry_exc)
+                    if isinstance(retry_exc, (BotApiError, httpx.HTTPError, OSError)):
+                        self._thread_cache[repo] = None
                     return None
-            except (BotApiError, httpx.HTTPError, OSError) as exc:
+            except (BotApiError, httpx.HTTPError, OSError, ValueError) as exc:
                 log.warning(
                     "Failed to create forum topic for %s, sending without topic: %s",
                     repo, exc,
                 )
                 self._thread_cache[repo] = None
                 return None
-            finally:
-                self._thread_locks.pop(repo, None)
 
     async def _thread_kwargs(self, issue: Issue | None) -> dict:
         """Return {"message_thread_id": N} if topics enabled, else {}."""
@@ -141,7 +141,6 @@ class TelegramBot:
     ) -> None:
         """Send or update the progress card for an issue."""
         text = build_progress_message(issue, workflow, stage_states, total_elapsed)
-        tkw = await self._thread_kwargs(issue)
 
         if issue.id in self._progress_messages:
             msg_id = self._progress_messages[issue.id]
@@ -149,6 +148,7 @@ class TelegramBot:
                 self._chat_id, msg_id, text, parse_mode="HTML",
             )
         else:
+            tkw = await self._thread_kwargs(issue)
             future = await self._outbox.enqueue_send(
                 self._chat_id, text, parse_mode="HTML", **tkw,
             )
@@ -250,10 +250,17 @@ class TelegramBot:
         issue: Issue | None,
         blocked_commands: list[dict],
     ) -> None:
-        """Send a security alert for blocked commands."""
+        """Send a security alert for blocked commands. Awaits delivery."""
         if not blocked_commands:
             return
-        await self._fire_and_forget(build_security_message(issue, blocked_commands), issue)
+        tkw = await self._thread_kwargs(issue)
+        future = await self._outbox.enqueue_send(
+            self._chat_id,
+            build_security_message(issue, blocked_commands),
+            parse_mode="HTML",
+            **tkw,
+        )
+        await future
 
     def clear_progress(self, issue_id: int) -> None:
         """Remove tracked progress message after issue completes."""

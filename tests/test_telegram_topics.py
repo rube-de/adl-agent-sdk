@@ -380,7 +380,7 @@ async def test_resolve_thread_retries_after_rate_limit(topics_config, state_stor
 
 @pytest.mark.asyncio
 async def test_resolve_thread_retry_fails_returns_none(topics_config, state_store, sample_issue):
-    """If the retry after rate-limit also fails, returns None without caching."""
+    """If the retry after rate-limit also fails with a permanent error, returns None and caches."""
     bot = TelegramBot(topics_config, store=state_store)
     with patch.object(
         bot._api, "create_forum_topic",
@@ -392,8 +392,8 @@ async def test_resolve_thread_retry_fails_returns_none(topics_config, state_stor
     ), patch("auto_dev_loop.telegram.asyncio.sleep", new_callable=AsyncMock):
         thread_id = await bot._resolve_thread_id(sample_issue.repo)
     assert thread_id is None
-    # Not cached — next call should try again
-    assert sample_issue.repo not in bot._thread_cache
+    # Cached as None — prevents infinite retry loop for permanent errors
+    assert bot._thread_cache[sample_issue.repo] is None
 
 
 def test_use_topics_requires_state_store(topics_config):
