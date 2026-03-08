@@ -17,9 +17,9 @@ structured failures.
 
 ## Output Format
 
-End your response with exactly one of:
+End your response with exactly one of the following verdict markers on its own line:
 - `<<<VERDICT:TESTS_PASSING>>>` — all tests pass
-- `TESTS_FAILING` — followed by a JSON block:
+- `<<<VERDICT:NEEDS_REVISION>>>` — tests failing, followed by a JSON block:
 
 ```json
 {

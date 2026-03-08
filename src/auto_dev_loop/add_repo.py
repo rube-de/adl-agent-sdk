@@ -27,7 +27,7 @@ def scaffold_files(source_dir: Path | Traversable, target_dir: Path) -> list[str
     """
     target_dir.mkdir(parents=True, exist_ok=True)
     copied: list[str] = []
-    for src_file in sorted(source_dir.iterdir()):
+    for src_file in sorted(source_dir.iterdir(), key=lambda p: p.name):
         if not src_file.is_file():
             continue
         dest = target_dir / src_file.name
@@ -77,6 +77,10 @@ def _remove_repo_config(config_path: Path, repo_path: Path) -> None:
     data = load_config_raw(config_path)
     target = str(repo_path.resolve())
     repos = data.get("repos") or []
+    if not isinstance(repos, list):
+        raise AddRepoError(
+            f"Config file {config_path} is invalid: 'repos' must be a list."
+        )
     data["repos"] = [
         r for r in repos
         if not (
@@ -223,7 +227,7 @@ def list_status_options(owner: str, project_number: int) -> list[str]:
             field.get("name") == "Status"
             and field.get("type") == "ProjectV2SingleSelectField"
         ):
-            return [opt["name"] for opt in field.get("options", [])]
+            return [opt["name"] for opt in field.get("options", []) if opt.get("name")]
     return []
 
 
@@ -423,7 +427,8 @@ def run_add_wizard(
     else:
         typer.echo("No Status field found.")
         typer.echo("Enter the names of the three status columns in your project.")
-        while True:
+        max_attempts = 5
+        for _attempt in range(max_attempts):
             columns = {
                 "source": typer.prompt(
                     "Column name for items ready for development",
@@ -441,6 +446,9 @@ def run_add_wizard(
             if len(set(columns.values())) == 3:
                 break
             typer.echo("  Each role must map to a different column. Please try again.")
+        else:
+            typer.echo("  Too many invalid attempts.", err=True)
+            raise typer.Exit(1)
 
     # 8. Scaffold agents and workflows
     agents_copied = scaffold_files(BUNDLED_AGENTS_DIR, resolved / "agents")

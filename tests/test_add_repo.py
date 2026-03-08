@@ -28,13 +28,21 @@ from auto_dev_loop.bundled import BUNDLED_AGENTS_DIR, BUNDLED_WORKFLOWS_DIR
 
 def test_bundled_agents_dir_exists():
     assert BUNDLED_AGENTS_DIR.is_dir()
-    agent_files = list(BUNDLED_AGENTS_DIR.glob("*.md"))
+    agent_files = [
+        entry
+        for entry in BUNDLED_AGENTS_DIR.iterdir()
+        if entry.is_file() and entry.name.endswith(".md")
+    ]
     assert len(agent_files) >= 1
 
 
 def test_bundled_workflows_dir_exists():
     assert BUNDLED_WORKFLOWS_DIR.is_dir()
-    workflow_files = list(BUNDLED_WORKFLOWS_DIR.glob("*.yaml"))
+    workflow_files = [
+        entry
+        for entry in BUNDLED_WORKFLOWS_DIR.iterdir()
+        if entry.name.endswith(".yaml")
+    ]
     assert len(workflow_files) >= 1
 
 
@@ -363,6 +371,7 @@ class TestRunAddWizard:
         assert entry["project_number"] == 1
         assert entry["owner"] == "acme"
         assert entry["columns"]["source"] == "Ready for Dev"
+        assert entry["repo"] == "my-app"
 
     @patch("auto_dev_loop.add_repo.check_gh_available")
     @patch("auto_dev_loop.add_repo.detect_github_remote")
@@ -486,6 +495,7 @@ class TestRunAddWizard:
         entry = result["repos"][0]
         assert entry["project_number"] == 5
         assert entry["owner"] == "acme"
+        assert entry["repo"] == "my-app"
 
     @patch("auto_dev_loop.add_repo.check_gh_available")
     @patch("auto_dev_loop.add_repo.detect_github_remote")

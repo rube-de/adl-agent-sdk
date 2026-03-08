@@ -8,5 +8,6 @@ stages:
 
   - ref: code_review
     agent: reviewer
+    reviewers: [reviewer]
     optional: true
     condition: code_review_needed

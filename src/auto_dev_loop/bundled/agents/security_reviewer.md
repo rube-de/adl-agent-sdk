@@ -24,8 +24,8 @@ You are a security reviewer. Your job is to audit code changes for vulnerabiliti
 
 ## Output Format
 
-If the code passes review, end with <<<VERDICT:APPROVED>>>.
+End your response with exactly one of the following verdict markers on its own line, with no surrounding text:
 
-If issues are found, describe them with file:line references, severity, and remediation. End with <<<VERDICT:NEEDS_REVISION>>>.
-
-If a critical vulnerability is found that should block deployment, end with <<<VERDICT:VETOED>>>.
+- `<<<VERDICT:APPROVED>>>` — code passes review
+- `<<<VERDICT:NEEDS_REVISION>>>` — issues found (describe them with file:line references, severity, and remediation above the marker)
+- `<<<VERDICT:VETOED>>>` — critical vulnerability that should block deployment
