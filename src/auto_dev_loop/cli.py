@@ -79,7 +79,7 @@ def init(
 
 @app.command()
 def add(
-    path: Path = typer.Argument(
+    path: Path | None = typer.Argument(
         None,
         help="Path to the git repository to onboard. Defaults to current directory.",
     ),

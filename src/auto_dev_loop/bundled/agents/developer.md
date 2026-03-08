@@ -28,4 +28,4 @@ You will receive:
 
 End your response with:
 - `<<<VERDICT:IMPLEMENTATION_COMPLETE>>>` — all changes applied and tests pass
-- `BLOCKED` — followed by description of what's blocking progress
+- `<<<VERDICT:BLOCKED>>>` — followed by description of what's blocking progress

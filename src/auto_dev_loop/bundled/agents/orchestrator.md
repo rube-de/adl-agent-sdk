@@ -28,4 +28,4 @@ working as an Agent Team.
 
 End your response with:
 - `<<<VERDICT:TESTS_PASSING>>>` — all tests pass, implementation complete
-- `MAX_ITERATIONS` — exhausted iteration budget
+- `<<<VERDICT:MAX_ITERATIONS>>>` — exhausted iteration budget

@@ -38,8 +38,22 @@ def scaffold_files(source_dir: Path, target_dir: Path) -> list[str]:
 
 
 def load_config_raw(config_path: Path) -> dict[str, Any]:
-    """Load config YAML as a raw dict (no dataclass parsing)."""
-    return yaml.safe_load(config_path.read_text()) or {}
+    """Load config YAML as a raw dict (no dataclass parsing).
+
+    Raises AddRepoError if the file is not valid YAML or not a mapping.
+    Raises FileNotFoundError if config_path does not exist.
+    """
+    try:
+        raw = yaml.safe_load(config_path.read_text())
+    except yaml.YAMLError as exc:
+        raise AddRepoError(f"Config file {config_path} is not valid YAML.") from exc
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise AddRepoError(
+            f"Config file {config_path} must contain a YAML mapping at the top level."
+        )
+    return raw
 
 
 def is_repo_configured(config_path: Path, repo_path: Path) -> bool:
@@ -55,10 +69,30 @@ def is_repo_configured(config_path: Path, repo_path: Path) -> bool:
     return False
 
 
+def _remove_repo_config(config_path: Path, repo_path: Path) -> None:
+    """Remove an existing repo entry from config by resolved path."""
+    data = load_config_raw(config_path)
+    target = str(repo_path.resolve())
+    repos = data.get("repos") or []
+    data["repos"] = [
+        r for r in repos
+        if not (
+            isinstance(r, dict)
+            and r.get("path")
+            and str(Path(r["path"]).expanduser().resolve()) == target
+        )
+    ]
+    config_path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+
 def append_repo_config(config_path: Path, entry: dict[str, Any]) -> None:
     """Append a repo entry to the config's repos list and write back."""
     data = load_config_raw(config_path)
-    repos = data.get("repos", [])
+    repos = data.get("repos") or []
+    if not isinstance(repos, list):
+        raise AddRepoError(
+            f"Config file {config_path} is invalid: 'repos' must be a list."
+        )
     repos.append(entry)
     data["repos"] = repos
     config_path.write_text(yaml.safe_dump(data, sort_keys=False))
@@ -108,10 +142,10 @@ def detect_github_remote(repo_path: Path) -> tuple[str, str]:
             "Ensure the directory is a git repo with a GitHub remote."
         )
     name_with_owner = result.stdout.strip()
-    parts = name_with_owner.split("/", 1)
-    if len(parts) != 2 or not parts[0] or not parts[1]:
+    owner, sep, repo_name = name_with_owner.partition("/")
+    if not sep or not owner or not repo_name:
         raise AddRepoError(f"Unexpected nameWithOwner format: {name_with_owner!r}")
-    return parts[0], parts[1]
+    return owner, repo_name
 
 
 def list_gh_projects(owner: str) -> list[dict[str, Any]]:
@@ -125,7 +159,12 @@ def list_gh_projects(owner: str) -> list[dict[str, Any]]:
         raise AddRepoError(
             f"Could not list projects for {owner}: {result.stderr.strip()}"
         )
-    data = json.loads(result.stdout)
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise AddRepoError(
+            f"Could not parse project list response: {exc}"
+        ) from exc
     return data.get("projects", [])
 
 
@@ -151,7 +190,12 @@ def list_status_options(owner: str, project_number: int) -> list[str]:
     )
     if result.returncode != 0:
         raise AddRepoError(f"Could not list project fields: {result.stderr.strip()}")
-    data = json.loads(result.stdout)
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise AddRepoError(
+            f"Could not parse project fields response: {exc}"
+        ) from exc
     for field in data.get("fields", []):
         if (
             field.get("name") == "Status"
@@ -187,16 +231,19 @@ def detect_column_defaults(options: list[str]) -> dict[str, str]:
 
 def _prompt_column(role: str, options: list[str], default: str | None) -> str:
     """Prompt user to select a column for a given role."""
-    if default:
-        typer.echo(f"  {role}: {default}")
-        return default
-
     typer.echo(f"  Select column for '{role}':")
     for i, opt in enumerate(options, 1):
-        typer.echo(f"    {i}. {opt}")
-    idx = typer.prompt(f"  {role} column number", type=int)
+        marker = " (detected)" if opt == default else ""
+        typer.echo(f"    {i}. {opt}{marker}")
+    prompt_text = f"  {role} column number"
+    if default and default in options:
+        default_idx = options.index(default) + 1
+        idx = typer.prompt(prompt_text, type=int, default=default_idx)
+    else:
+        idx = typer.prompt(prompt_text, type=int)
     if 1 <= idx <= len(options):
         return options[idx - 1]
+    typer.echo(f"  Invalid selection '{idx}'. Enter a custom column name:")
     return typer.prompt(f"  Custom column name for {role}")
 
 
@@ -257,6 +304,7 @@ def run_add_wizard(
         typer.echo(f"Repository {resolved} is already configured.")
         if not typer.confirm("Reconfigure?", default=False):
             raise typer.Exit(0)
+        _remove_repo_config(config_path, resolved)
 
     # 4. Check gh CLI
     try:
@@ -301,11 +349,21 @@ def run_add_wizard(
     if status_options:
         columns = _prompt_columns(status_options)
     else:
-        typer.echo("No Status field found. Using default column names.")
+        typer.echo("No Status field found.")
+        typer.echo("Enter the names of the three status columns in your project.")
         columns = {
-            "source": "Ready for Dev",
-            "in_progress": "In Progress",
-            "done": "Done",
+            "source": typer.prompt(
+                "Column name for items ready for development",
+                default="Ready for Dev",
+            ),
+            "in_progress": typer.prompt(
+                "Column name for items in progress",
+                default="In Progress",
+            ),
+            "done": typer.prompt(
+                "Column name for completed items",
+                default="Done",
+            ),
         }
 
     # 8. Scaffold agents and workflows

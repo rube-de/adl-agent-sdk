@@ -24,4 +24,4 @@ You will receive:
 
 End your response with:
 - `<<<VERDICT:FEEDBACK_APPLIED>>>` — changes made according to feedback
-- `CLARIFICATION_NEEDED` — feedback is ambiguous, describe what's unclear
+- `<<<VERDICT:CLARIFICATION_NEEDED>>>` — feedback is ambiguous, describe what's unclear
