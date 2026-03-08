@@ -46,6 +46,8 @@ class TelegramBot:
     """Facade for all Telegram operations. Start once, use everywhere."""
 
     def __init__(self, config: TelegramConfig, store: StateStore | None = None):
+        if config.use_topics and store is None:
+            raise ValueError("StateStore is required when Telegram topics are enabled")
         self._config = config
         self._api = HttpBotClient(config.bot_token)
         client = TelegramClient(self._api, chat_type=config.chat_type)
@@ -66,25 +68,35 @@ class TelegramBot:
             return self._thread_cache[repo]  # may be None (cached failure)
         lock = self._thread_locks.setdefault(repo, asyncio.Lock())
         async with lock:
-            if repo in self._thread_cache:
-                return self._thread_cache[repo]
-            if self._store:
-                stored = await self._store.get_thread_id(repo)
-                if stored is not None:
-                    self._thread_cache[repo] = stored
-                    return stored
             try:
+                if repo in self._thread_cache:
+                    return self._thread_cache[repo]
+                if self._store:
+                    stored = await self._store.get_thread_id(repo)
+                    if stored is not None:
+                        self._thread_cache[repo] = stored
+                        return stored
                 result = await self._api.create_forum_topic(self._chat_id, repo)
                 thread_id = result.message_thread_id
-            except (BotApiError, RetryAfter, httpx.HTTPError, OSError) as exc:
-                log.warning("Failed to create forum topic for %s, sending without topic: %s", repo, exc)
+                self._thread_cache[repo] = thread_id
+                if self._store:
+                    await self._store.store_thread_id(repo, thread_id)
+                return thread_id
+            except RetryAfter as exc:
+                log.warning(
+                    "Rate-limited creating forum topic for %s, will retry next notification: %s",
+                    repo, exc,
+                )
+                return None
+            except (BotApiError, httpx.HTTPError, OSError) as exc:
+                log.warning(
+                    "Failed to create forum topic for %s, sending without topic: %s",
+                    repo, exc,
+                )
                 self._thread_cache[repo] = None
                 return None
-            self._thread_cache[repo] = thread_id
-            if self._store:
-                await self._store.store_thread_id(repo, thread_id)
-            self._thread_locks.pop(repo, None)
-            return thread_id
+            finally:
+                self._thread_locks.pop(repo, None)
 
     async def _thread_kwargs(self, issue: Issue | None) -> dict:
         """Return {"message_thread_id": N} if topics enabled, else {}."""

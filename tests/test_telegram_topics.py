@@ -11,7 +11,7 @@ from auto_dev_loop.models import Issue, TelegramConfig
 from auto_dev_loop.state import StateStore
 from auto_dev_loop.telegram import TelegramBot
 from auto_dev_loop.telegram.bot_api import HttpBotClient
-from auto_dev_loop.telegram.models import BotApiError, BotApiResponse, Chat, ForumTopic, Message
+from auto_dev_loop.telegram.models import BotApiError, BotApiResponse, Chat, ForumTopic, Message, RetryAfter
 
 
 # --- TelegramConfig model tests ---
@@ -355,6 +355,36 @@ async def test_resolve_thread_returns_none_on_api_failure(topics_config, state_s
     ):
         thread_id = await bot._resolve_thread_id(sample_issue.repo)
     assert thread_id is None
-    # Subsequent call should return cached None without calling API again
+    # Subsequent call should return cached None without calling API again (permanent failure)
     thread_id2 = await bot._resolve_thread_id(sample_issue.repo)
     assert thread_id2 is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_thread_retries_after_rate_limit(topics_config, state_store, sample_issue):
+    """RetryAfter is transient — should NOT be cached, allowing retry on next call."""
+    bot = TelegramBot(topics_config, store=state_store)
+    with patch.object(
+        bot._api, "create_forum_topic",
+        new_callable=AsyncMock,
+        side_effect=RetryAfter(30),
+    ) as mock_create:
+        thread_id = await bot._resolve_thread_id(sample_issue.repo)
+    assert thread_id is None
+    assert mock_create.await_count == 1
+
+    # Second call should retry (not return cached None)
+    with patch.object(
+        bot._api, "create_forum_topic",
+        new_callable=AsyncMock,
+        return_value=ForumTopic(message_thread_id=555, name="owner/repo"),
+    ) as mock_create2:
+        thread_id2 = await bot._resolve_thread_id(sample_issue.repo)
+    assert thread_id2 == 555
+    assert mock_create2.await_count == 1
+
+
+def test_use_topics_requires_state_store(topics_config):
+    """use_topics=True without a StateStore should raise ValueError."""
+    with pytest.raises(ValueError, match="StateStore is required"):
+        TelegramBot(topics_config, store=None)
