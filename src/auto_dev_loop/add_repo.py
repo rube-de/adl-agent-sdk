@@ -310,9 +310,14 @@ def _prompt_project(projects: list[dict[str, Any]]) -> dict[str, Any]:
     typer.echo("Available projects:")
     for i, p in enumerate(projects, 1):
         typer.echo(f"  {i}. #{p['number']} - {p['title']}")
-    idx = typer.prompt("Select project", type=int)
+    idx = typer.prompt("Select project (menu index or project number)", type=int)
+    # Try as 1-based menu index first
     if 1 <= idx <= len(projects):
         return projects[idx - 1]
+    # Try as a project number
+    for p in projects:
+        if p["number"] == idx:
+            return p
     raise AddRepoError(f"Invalid selection: {idx}")
 
 
@@ -328,11 +333,29 @@ def run_add_wizard(
         typer.echo("No config found. Run `adl init` first.", err=True)
         raise typer.Exit(1)
 
-    # 2. Resolve repo path
-    resolved = (repo_path or Path.cwd()).resolve()
-    if not (resolved / ".git").is_dir():
-        typer.echo(f"{resolved} is not a git repository.", err=True)
-        raise typer.Exit(1)
+    # 2. Resolve repo path (supports worktrees, submodules, and subdirs)
+    candidate = (repo_path or Path.cwd()).resolve()
+    if (candidate / ".git").exists():
+        # .git dir (normal repo) or .git file (worktree/submodule)
+        resolved = candidate
+    else:
+        # May be a subdirectory — try git rev-parse to find repo root
+        try:
+            result = subprocess.run(  # nosec B603 B607
+                ["git", "rev-parse", "--show-toplevel"],
+                capture_output=True,
+                text=True,
+                cwd=candidate,
+                timeout=10,
+            )
+            if result.returncode == 0:
+                resolved = Path(result.stdout.strip()).resolve()
+            else:
+                typer.echo(f"{candidate} is not a git repository.", err=True)
+                raise typer.Exit(1)
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            typer.echo(f"{candidate} is not a git repository.", err=True)
+            raise typer.Exit(1)
 
     # 3. Check for duplicates
     try:
