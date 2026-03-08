@@ -90,16 +90,15 @@ class TelegramBot:
                 await asyncio.sleep(exc.retry_after)
                 try:
                     result = await self._api.create_forum_topic(self._chat_id, repo)
-                    thread_id = result.message_thread_id
-                    self._thread_cache[repo] = thread_id
-                    if self._store:
-                        await self._store.store_thread_id(repo, thread_id)
-                    return thread_id
-                except Exception as retry_exc:
+                except (BotApiError, httpx.HTTPError, OSError, ValueError) as retry_exc:
                     log.warning("Retry failed for %s: %s", repo, retry_exc)
-                    if isinstance(retry_exc, (BotApiError, httpx.HTTPError, OSError)):
-                        self._thread_cache[repo] = None
+                    self._thread_cache[repo] = None
                     return None
+                thread_id = result.message_thread_id
+                self._thread_cache[repo] = thread_id
+                if self._store:
+                    await self._store.store_thread_id(repo, thread_id)
+                return thread_id
             except (BotApiError, httpx.HTTPError, OSError, ValueError) as exc:
                 log.warning(
                     "Failed to create forum topic for %s, sending without topic: %s",
@@ -260,7 +259,10 @@ class TelegramBot:
             parse_mode="HTML",
             **tkw,
         )
-        await future
+        try:
+            await future
+        except Exception as exc:
+            log.warning("Failed to deliver security alert: %s", exc)
 
     def clear_progress(self, issue_id: int) -> None:
         """Remove tracked progress message after issue completes."""
