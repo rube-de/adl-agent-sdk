@@ -106,7 +106,10 @@ def check_gh_available() -> None:
             capture_output=True,
             text=True,
             check=True,
+            timeout=10,
         )
+    except subprocess.TimeoutExpired as exc:
+        raise AddRepoError("GitHub CLI timed out. Check your network connection.") from exc
     except (FileNotFoundError, subprocess.CalledProcessError) as exc:
         raise AddRepoError(
             "GitHub CLI (gh) is not installed or not working. "
@@ -117,6 +120,7 @@ def check_gh_available() -> None:
         ["gh", "auth", "status"],
         capture_output=True,
         text=True,
+        timeout=10,
     )
     if result.returncode != 0:
         raise AddRepoError(
@@ -130,12 +134,16 @@ def detect_github_remote(repo_path: Path) -> tuple[str, str]:
     Uses ``gh repo view`` which reads the git remote and resolves it.
     Returns (owner, repo_name).
     """
-    result = subprocess.run(
-        ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
-        capture_output=True,
-        text=True,
-        cwd=repo_path,
-    )
+    try:
+        result = subprocess.run(
+            ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
+            capture_output=True,
+            text=True,
+            cwd=repo_path,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise AddRepoError("GitHub CLI timed out detecting remote. Check your network.") from exc
     if result.returncode != 0:
         raise AddRepoError(
             f"Could not detect GitHub remote: {result.stderr.strip()}\n"
@@ -150,11 +158,15 @@ def detect_github_remote(repo_path: Path) -> tuple[str, str]:
 
 def list_gh_projects(owner: str) -> list[dict[str, Any]]:
     """List GitHub Projects V2 for an owner."""
-    result = subprocess.run(
-        ["gh", "project", "list", "--owner", owner, "--format", "json"],
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            ["gh", "project", "list", "--owner", owner, "--format", "json"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise AddRepoError(f"GitHub CLI timed out listing projects for {owner}.") from exc
     if result.returncode != 0:
         raise AddRepoError(
             f"Could not list projects for {owner}: {result.stderr.strip()}"
@@ -174,20 +186,24 @@ def list_status_options(owner: str, project_number: int) -> list[str]:
     Returns a list of status option names (e.g. ["Todo", "In Progress", "Done"]).
     Returns empty list if no Status field is found.
     """
-    result = subprocess.run(
-        [
-            "gh",
-            "project",
-            "field-list",
-            str(project_number),
-            "--owner",
-            owner,
-            "--format",
-            "json",
-        ],
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            [
+                "gh",
+                "project",
+                "field-list",
+                str(project_number),
+                "--owner",
+                owner,
+                "--format",
+                "json",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise AddRepoError("GitHub CLI timed out listing project fields.") from exc
     if result.returncode != 0:
         raise AddRepoError(f"Could not list project fields: {result.stderr.strip()}")
     try:
@@ -259,10 +275,13 @@ def _prompt_columns(options: list[str]) -> dict[str, str]:
             return defaults
 
     typer.echo("Map project columns:")
-    columns = {}
-    for role in ("source", "in_progress", "done"):
-        columns[role] = _prompt_column(role, options, defaults.get(role))
-    return columns
+    while True:
+        columns = {}
+        for role in ("source", "in_progress", "done"):
+            columns[role] = _prompt_column(role, options, defaults.get(role))
+        if len(set(columns.values())) == 3:
+            return columns
+        typer.echo("  Each role must map to a different column. Please try again.")
 
 
 def _prompt_project(projects: list[dict[str, Any]]) -> dict[str, Any]:
@@ -337,7 +356,11 @@ def run_add_wizard(
         )
         raise typer.Exit(1)
 
-    project = _prompt_project(projects)
+    try:
+        project = _prompt_project(projects)
+    except AddRepoError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
 
     # 7. Map columns
     try:

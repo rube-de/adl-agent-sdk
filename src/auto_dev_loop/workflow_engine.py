@@ -107,6 +107,8 @@ def _parse_verdict(output: str, *, strict: bool = False) -> Verdict:
             return Verdict(status="needs_revision", feedback=rv.feedback)
         if line == VERDICT_VETOED:
             return Verdict(status="vetoed", feedback=output)
+        # TODO(#35): Handle VERDICT_BLOCKED, VERDICT_CLARIFICATION_NEEDED,
+        # and VERDICT_MAX_ITERATIONS once state machine support is added.
 
     if strict:
         return Verdict(status="needs_revision", feedback="No verdict marker found in output")

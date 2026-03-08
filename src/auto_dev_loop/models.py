@@ -14,6 +14,10 @@ VERDICT_TESTS_PASSING = "<<<VERDICT:TESTS_PASSING>>>"
 VERDICT_IMPLEMENTATION_COMPLETE = "<<<VERDICT:IMPLEMENTATION_COMPLETE>>>"
 VERDICT_FIXES_APPLIED = "<<<VERDICT:FIXES_APPLIED>>>"
 VERDICT_FEEDBACK_APPLIED = "<<<VERDICT:FEEDBACK_APPLIED>>>"
+# TODO(#35): These verdict constants are defined for agent prompt consistency
+# but are not yet handled by _parse_verdict() in workflow_engine.py.
+# They will silently fall through to the default verdict ("approved" in
+# non-strict mode) until #35 adds proper state machine support.
 VERDICT_BLOCKED = "<<<VERDICT:BLOCKED>>>"
 VERDICT_CLARIFICATION_NEEDED = "<<<VERDICT:CLARIFICATION_NEEDED>>>"
 VERDICT_MAX_ITERATIONS = "<<<VERDICT:MAX_ITERATIONS>>>"
