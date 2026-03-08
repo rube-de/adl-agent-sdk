@@ -55,6 +55,7 @@ class TelegramBot:
         self._tasks: list[asyncio.Task] = []
         self._store = store
         self._thread_cache: dict[str, int] = {}
+        self._thread_locks: dict[str, asyncio.Lock] = {}
 
     async def _resolve_thread_id(self, repo: str) -> int | None:
         """Return the forum topic thread ID for *repo*, or None if topics disabled."""
@@ -62,21 +63,30 @@ class TelegramBot:
             return None
         if repo in self._thread_cache:
             return self._thread_cache[repo]
-        if self._store:
-            stored = await self._store.get_thread_id(repo)
-            if stored is not None:
-                self._thread_cache[repo] = stored
-                return stored
-        result = await self._api.create_forum_topic(self._chat_id, repo)
-        thread_id = result["message_thread_id"]
-        self._thread_cache[repo] = thread_id
-        if self._store:
-            await self._store.store_thread_id(repo, thread_id)
-        return thread_id
+        lock = self._thread_locks.setdefault(repo, asyncio.Lock())
+        async with lock:
+            # Double-check after acquiring lock
+            if repo in self._thread_cache:
+                return self._thread_cache[repo]
+            if self._store:
+                stored = await self._store.get_thread_id(repo)
+                if stored is not None:
+                    self._thread_cache[repo] = stored
+                    return stored
+            try:
+                result = await self._api.create_forum_topic(self._chat_id, repo)
+            except Exception:
+                log.warning("Failed to create forum topic for %s, sending without topic", repo)
+                return None
+            thread_id = result["message_thread_id"]
+            self._thread_cache[repo] = thread_id
+            if self._store:
+                await self._store.store_thread_id(repo, thread_id)
+            return thread_id
 
     async def _thread_kwargs(self, issue: Issue | None) -> dict:
         """Return {"message_thread_id": N} if topics enabled, else {}."""
-        if issue is None or not self._config.use_topics:
+        if issue is None:
             return {}
         thread_id = await self._resolve_thread_id(issue.repo)
         if thread_id is not None:

@@ -213,7 +213,7 @@ async def test_notify_completion_sends_to_thread(topics_config, state_store, sam
     await state_store.store_thread_id("owner/repo", 555)
     bot = TelegramBot(topics_config, store=state_store)
     with patch.object(bot._outbox, "enqueue_send", new_callable=AsyncMock) as mock_send:
-        mock_future = asyncio.get_event_loop().create_future()
+        mock_future = asyncio.get_running_loop().create_future()
         mock_future.set_result(None)
         mock_send.return_value = mock_future
         await bot.notify_completion(sample_issue, "https://github.com/pr/1")
@@ -225,7 +225,7 @@ async def test_notify_completion_sends_to_thread(topics_config, state_store, sam
 async def test_notify_completion_no_thread_when_disabled(no_topics_config, state_store, sample_issue):
     bot = TelegramBot(no_topics_config, store=state_store)
     with patch.object(bot._outbox, "enqueue_send", new_callable=AsyncMock) as mock_send:
-        mock_future = asyncio.get_event_loop().create_future()
+        mock_future = asyncio.get_running_loop().create_future()
         mock_future.set_result(None)
         mock_send.return_value = mock_future
         await bot.notify_completion(sample_issue, "https://github.com/pr/1")
@@ -242,7 +242,7 @@ async def test_full_round_trip_topic_creation_and_reuse(topics_config, state_sto
     bot = TelegramBot(topics_config, store=state_store)
 
     mock_msg = Message(message_id=10, chat=Chat(id=-100123, type="supergroup"))
-    mock_future = asyncio.get_event_loop().create_future()
+    mock_future = asyncio.get_running_loop().create_future()
     mock_future.set_result(mock_msg)
 
     with (
@@ -263,7 +263,7 @@ async def test_full_round_trip_topic_creation_and_reuse(topics_config, state_sto
         assert mock_send.call_args.kwargs["message_thread_id"] == 777
 
         # Second call — reuses cached thread ID (no new topic created)
-        mock_future2 = asyncio.get_event_loop().create_future()
+        mock_future2 = asyncio.get_running_loop().create_future()
         mock_future2.set_result(None)
         mock_send.return_value = mock_future2
         await bot.notify_error(sample_issue, "oops")
@@ -280,7 +280,7 @@ async def test_topics_disabled_sends_no_thread_id(no_topics_config, state_store,
     """When use_topics=False, no message_thread_id is sent."""
     bot = TelegramBot(no_topics_config, store=state_store)
 
-    mock_future = asyncio.get_event_loop().create_future()
+    mock_future = asyncio.get_running_loop().create_future()
     mock_future.set_result(None)
 
     with patch.object(bot._outbox, "enqueue_send", new_callable=AsyncMock, return_value=mock_future) as mock_send:
@@ -297,7 +297,7 @@ async def test_escalate_sends_to_thread(topics_config, state_store, sample_issue
     bot = TelegramBot(topics_config, store=state_store)
 
     mock_msg = Message(message_id=99, chat=Chat(id=-100123, type="supergroup"))
-    mock_future = asyncio.get_event_loop().create_future()
+    mock_future = asyncio.get_running_loop().create_future()
     mock_future.set_result(mock_msg)
 
     stage = StageConfig(ref="review", agent="reviewer")
