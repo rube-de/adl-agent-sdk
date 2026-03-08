@@ -1,8 +1,20 @@
 """Tests for Telegram per-repo forum topic threading."""
 
+import asyncio
+from unittest.mock import AsyncMock, patch
+
+import msgspec
 import pytest
 
-from auto_dev_loop.models import TelegramConfig
+from auto_dev_loop.config import load_config
+from auto_dev_loop.models import Issue, TelegramConfig
+from auto_dev_loop.state import StateStore
+from auto_dev_loop.telegram import TelegramBot
+from auto_dev_loop.telegram.bot_api import HttpBotClient
+from auto_dev_loop.telegram.models import BotApiResponse, Chat, Message
+
+
+# --- TelegramConfig model tests ---
 
 
 def test_telegram_config_use_topics_default_false():
@@ -15,8 +27,7 @@ def test_telegram_config_use_topics_enabled():
     assert cfg.use_topics is True
 
 
-from pathlib import Path
-from auto_dev_loop.config import load_config
+# --- Config parsing tests ---
 
 
 @pytest.fixture
@@ -51,13 +62,7 @@ def test_config_parses_use_topics_default_false(config_yaml):
     assert cfg.telegram.use_topics is False
 
 
-import asyncio
-from unittest.mock import AsyncMock, patch
-
-import msgspec
-
-from auto_dev_loop.telegram.bot_api import HttpBotClient
-from auto_dev_loop.telegram.models import BotApiResponse, Chat, Message
+# --- HttpBotClient API tests ---
 
 
 @pytest.fixture
@@ -122,9 +127,27 @@ async def test_edit_message_text_with_thread_id(bot_client):
         assert call_kwargs.kwargs["message_thread_id"] == 999
 
 
-from auto_dev_loop.telegram import TelegramBot, HumanDecision
-from auto_dev_loop.state import StateStore
-from auto_dev_loop.models import Issue
+# --- TelegramClient passthrough test ---
+
+
+@pytest.mark.asyncio
+async def test_telegram_client_forwards_message_thread_id(bot_client):
+    """TelegramClient (rate-limited wrapper) must forward message_thread_id to HttpBotClient."""
+    from auto_dev_loop.telegram.client import TelegramClient
+
+    mock_msg = Message(message_id=42, chat=Chat(id=-100123, type="supergroup"))
+    mock_resp = BotApiResponse(
+        ok=True,
+        result=msgspec.json.encode(mock_msg),
+    )
+    client = TelegramClient(bot_api=bot_client, chat_type="supergroup")
+    with patch.object(bot_client, "call", new_callable=AsyncMock, return_value=mock_resp):
+        await client.send_message(chat_id=-100123, text="hi", message_thread_id=777)
+        call_kwargs = bot_client.call.call_args
+        assert call_kwargs.kwargs["message_thread_id"] == 777
+
+
+# --- TelegramBot thread routing tests ---
 
 
 @pytest.fixture
@@ -210,21 +233,7 @@ async def test_notify_completion_no_thread_when_disabled(no_topics_config, state
     assert "message_thread_id" not in call_kwargs.kwargs
 
 
-@pytest.mark.asyncio
-async def test_telegram_client_forwards_message_thread_id(bot_client):
-    """TelegramClient (rate-limited wrapper) must forward message_thread_id to HttpBotClient."""
-    from auto_dev_loop.telegram.client import TelegramClient
-
-    mock_msg = Message(message_id=42, chat=Chat(id=-100123, type="supergroup"))
-    mock_resp = BotApiResponse(
-        ok=True,
-        result=msgspec.json.encode(mock_msg),
-    )
-    client = TelegramClient(bot_api=bot_client, chat_type="supergroup")
-    with patch.object(bot_client, "call", new_callable=AsyncMock, return_value=mock_resp):
-        await client.send_message(chat_id=-100123, text="hi", message_thread_id=777)
-        call_kwargs = bot_client.call.call_args
-        assert call_kwargs.kwargs["message_thread_id"] == 777
+# --- Integration tests ---
 
 
 @pytest.mark.asyncio
