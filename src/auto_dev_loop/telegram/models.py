@@ -57,6 +57,11 @@ class InlineKeyboardMarkup(msgspec.Struct):
     inline_keyboard: list[list[InlineKeyboardButton]]
 
 
+class ForumTopic(msgspec.Struct):
+    message_thread_id: int
+    name: str
+
+
 # Exceptions
 
 class RetryAfter(Exception):

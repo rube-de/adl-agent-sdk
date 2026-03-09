@@ -6,9 +6,11 @@ import asyncio
 import logging
 from dataclasses import dataclass
 
+import httpx
 import msgspec
 
 from ..models import Issue, StageState, TelegramConfig
+from ..state import StateStore
 from ..workflow_loader import WorkflowConfig, StageConfig
 from .bot_api import HttpBotClient
 from .callbacks import decode_callback
@@ -20,7 +22,7 @@ from .messages import (
     build_progress_message,
     build_security_message,
 )
-from .models import CallbackQuery, Message
+from .models import BotApiError, CallbackQuery, Message, RetryAfter
 from .outbox import TelegramOutbox
 from .poller import TelegramPoller
 
@@ -43,7 +45,9 @@ class HumanDecision:
 class TelegramBot:
     """Facade for all Telegram operations. Start once, use everywhere."""
 
-    def __init__(self, config: TelegramConfig):
+    def __init__(self, config: TelegramConfig, store: StateStore | None = None):
+        if config.use_topics and store is None:
+            raise ValueError("StateStore is required when Telegram topics are enabled")
         self._config = config
         self._api = HttpBotClient(config.bot_token)
         client = TelegramClient(self._api, chat_type=config.chat_type)
@@ -52,6 +56,71 @@ class TelegramBot:
         self._chat_id = config.chat_id
         self._progress_messages: dict[int, int] = {}
         self._tasks: list[asyncio.Task] = []
+        self._store = store
+        self._thread_cache: dict[str, int | None] = {}
+        self._thread_locks: dict[str, asyncio.Lock] = {}
+
+    async def _cache_and_store_thread(self, repo: str, thread_id: int) -> int:
+        """Cache thread_id in memory and persist to store (non-fatal on DB error)."""
+        self._thread_cache[repo] = thread_id
+        if self._store:
+            try:
+                await self._store.store_thread_id(repo, thread_id)
+            except Exception as db_exc:
+                log.warning("Failed to persist thread ID for %s: %s", repo, db_exc)
+        return thread_id
+
+    async def _resolve_thread_id(self, repo: str) -> int | None:
+        """Return the forum topic thread ID for *repo*, or None if topics disabled."""
+        if not self._config.use_topics:
+            return None
+        if repo in self._thread_cache:
+            return self._thread_cache[repo]  # may be None (cached failure)
+        lock = self._thread_locks.setdefault(repo, asyncio.Lock())
+        async with lock:
+            try:
+                if repo in self._thread_cache:
+                    return self._thread_cache[repo]
+                if self._store:
+                    stored = await self._store.get_thread_id(repo)
+                    if stored is not None:
+                        self._thread_cache[repo] = stored
+                        return stored
+                # Note: create_forum_topic intentionally bypasses the
+                # rate-limited TelegramClient. Topic creation is a
+                # once-per-repo operation (cached immediately), and
+                # the RetryAfter handler here provides its own backoff.
+                result = await self._api.create_forum_topic(self._chat_id, repo)
+                return await self._cache_and_store_thread(repo, result.message_thread_id)
+            except RetryAfter as exc:
+                log.warning(
+                    "Rate-limited creating topic for %s, retrying after %ss",
+                    repo, exc.retry_after,
+                )
+                await asyncio.sleep(exc.retry_after)
+                try:
+                    result = await self._api.create_forum_topic(self._chat_id, repo)
+                except (BotApiError, RetryAfter, httpx.HTTPError, OSError, ValueError) as retry_exc:
+                    log.warning("Retry failed for %s: %s", repo, retry_exc)
+                    self._thread_cache[repo] = None
+                    return None
+                return await self._cache_and_store_thread(repo, result.message_thread_id)
+            except (BotApiError, httpx.HTTPError, OSError, ValueError) as exc:
+                log.warning(
+                    "Failed to create forum topic for %s, sending without topic: %s",
+                    repo, exc,
+                )
+                self._thread_cache[repo] = None
+                return None
+
+    async def _thread_kwargs(self, issue: Issue | None) -> dict:
+        """Return {"message_thread_id": N} if topics enabled, else {}."""
+        if issue is None:
+            return {}
+        thread_id = await self._resolve_thread_id(issue.repo)
+        if thread_id is not None:
+            return {"message_thread_id": thread_id}
+        return {}
 
     async def start(self) -> None:
         """Launch background drain + poll loops."""
@@ -84,8 +153,9 @@ class TelegramBot:
                 self._chat_id, msg_id, text, parse_mode="HTML",
             )
         else:
+            tkw = await self._thread_kwargs(issue)
             future = await self._outbox.enqueue_send(
-                self._chat_id, text, parse_mode="HTML",
+                self._chat_id, text, parse_mode="HTML", **tkw,
             )
             try:
                 msg = await future
@@ -106,6 +176,7 @@ class TelegramBot:
     ) -> HumanDecision:
         """Send escalation with inline buttons, block until human responds or timeout."""
         text, keyboard = build_escalation_message(issue, stage, verdict, reason)
+        tkw = await self._thread_kwargs(issue)
 
         future = await self._outbox.enqueue_send(
             self._chat_id, text,
@@ -113,6 +184,7 @@ class TelegramBot:
                 msgspec.json.encode(keyboard), type=dict,
             ),
             parse_mode="HTML",
+            **tkw,
         )
         try:
             msg = await future
@@ -166,27 +238,37 @@ class TelegramBot:
 
     # --- Notifications ---
 
-    async def notify_completion(self, issue: Issue, pr_url: str) -> None:
-        text = build_completion_message(issue, pr_url)
-        future = await self._outbox.enqueue_send(self._chat_id, text, parse_mode="HTML")
+    async def _fire_and_forget(self, text: str, issue: Issue | None) -> None:
+        """Enqueue a message with thread routing and suppress send errors."""
+        tkw = await self._thread_kwargs(issue)
+        future = await self._outbox.enqueue_send(self._chat_id, text, parse_mode="HTML", **tkw)
         future.add_done_callback(_suppress_exception)
 
+    async def notify_completion(self, issue: Issue, pr_url: str) -> None:
+        await self._fire_and_forget(build_completion_message(issue, pr_url), issue)
+
     async def notify_error(self, issue: Issue, error: str) -> None:
-        text = build_error_message(issue, error)
-        future = await self._outbox.enqueue_send(self._chat_id, text, parse_mode="HTML")
-        future.add_done_callback(_suppress_exception)
+        await self._fire_and_forget(build_error_message(issue, error), issue)
 
     async def notify_security(
         self,
         issue: Issue | None,
         blocked_commands: list[dict],
     ) -> None:
-        """Send a security alert for blocked commands."""
+        """Send a security alert for blocked commands. Awaits delivery."""
         if not blocked_commands:
             return
-        text = build_security_message(issue, blocked_commands)
-        future = await self._outbox.enqueue_send(self._chat_id, text, parse_mode="HTML")
-        future.add_done_callback(_suppress_exception)
+        tkw = await self._thread_kwargs(issue)
+        future = await self._outbox.enqueue_send(
+            self._chat_id,
+            build_security_message(issue, blocked_commands),
+            parse_mode="HTML",
+            **tkw,
+        )
+        try:
+            await future
+        except Exception as exc:
+            log.warning("Failed to deliver security alert: %s", exc)
 
     def clear_progress(self, issue_id: int) -> None:
         """Remove tracked progress message after issue completes."""

@@ -69,6 +69,7 @@ def load_config(path: Path) -> Config:
         chat_type=tg.get("chat_type", "private"),
         human_timeout=tg.get("human_timeout", 3600),
         progress_updates=tg.get("progress_updates", True),
+        use_topics=tg.get("use_topics", False),
     )
 
     # Parse repos

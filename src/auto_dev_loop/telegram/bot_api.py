@@ -5,7 +5,7 @@ from __future__ import annotations
 import httpx
 import msgspec
 
-from .models import BotApiResponse, Message, Update, RetryAfter, BotApiError
+from .models import BotApiResponse, ForumTopic, Message, Update, RetryAfter, BotApiError
 
 
 class HttpBotClient:
@@ -28,10 +28,13 @@ class HttpBotClient:
     async def send_message(
         self, chat_id: int, text: str,
         reply_markup: dict | None = None, parse_mode: str = "HTML",
+        message_thread_id: int | None = None,
     ) -> Message:
         params = {"chat_id": chat_id, "text": text, "parse_mode": parse_mode}
         if reply_markup:
             params["reply_markup"] = reply_markup
+        if message_thread_id is not None:
+            params["message_thread_id"] = message_thread_id
         resp = await self.call("sendMessage", **params)
         return msgspec.json.decode(resp.result, type=Message)
 
@@ -47,6 +50,11 @@ class HttpBotClient:
             params["reply_markup"] = reply_markup
         resp = await self.call("editMessageText", **params)
         return msgspec.json.decode(resp.result, type=Message)
+
+    async def create_forum_topic(self, chat_id: int, name: str) -> ForumTopic:
+        """Create a forum topic in a supergroup."""
+        resp = await self.call("createForumTopic", chat_id=chat_id, name=name[:128])
+        return msgspec.json.decode(resp.result, type=ForumTopic)
 
     async def delete_message(self, chat_id: int, message_id: int) -> bool:
         await self.call("deleteMessage", chat_id=chat_id, message_id=message_id)
