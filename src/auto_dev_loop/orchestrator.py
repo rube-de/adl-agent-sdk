@@ -12,7 +12,7 @@ from .agent_loader import load_agents
 from .branch import build_branch_name
 from .dispatcher import OrchestratorDispatcher
 from .hooks import CommandGuard, LoggingSecurityHandler, create_default_guard
-from .models import Config, Issue
+from .models import Config, Issue, ResolvedRepoConfig
 from .pr import build_pr_command, create_pr  # noqa: F401 — re-exported for tests
 from .workflow_engine import execute_workflow
 from .workflow_loader import load_all_workflows
@@ -92,7 +92,7 @@ async def _transition(
 
 async def process_issue(
     issue: Issue,
-    config: Config,
+    config: Config | ResolvedRepoConfig,
     repo_path: Path | None = None,
     telegram: TelegramBot | None = None,
     store: StateStore | None = None,

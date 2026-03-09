@@ -53,10 +53,19 @@ def validate(
     ),
 ) -> None:
     """Validate config, agents, and workflows."""
-    from .config import load_config, ConfigError
+    from .config import load_config, resolve_repo_config, ConfigError
+    from .models import RepoConfig
 
     try:
         cfg = load_config(config)
+        # Validate per-repo overrides by resolving each repo
+        for i, repo_cfg in enumerate(cfg.repos):
+            if not isinstance(repo_cfg, RepoConfig):
+                continue
+            try:
+                resolve_repo_config(repo_cfg, cfg)
+            except (TypeError, KeyError, ValueError) as e:
+                raise ConfigError(f"Invalid per-repo override in repos[{i}] ({repo_cfg.path}): {e}")
         typer.echo(f"Config OK: {len(cfg.repos)} repo(s), version {cfg.version}")
     except ConfigError as e:
         typer.echo(f"Config error: {e}", err=True)

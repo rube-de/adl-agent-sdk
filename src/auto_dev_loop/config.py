@@ -12,6 +12,7 @@ from .models import (
     Config,
     Defaults,
     RepoConfig,
+    ResolvedRepoConfig,
     TelegramConfig,
     WorkflowSelectionConfig,
 )
@@ -76,7 +77,7 @@ def load_config(path: Path) -> Config:
     repos = []
     for i, r in enumerate(raw.get("repos", [])):
         try:
-            kwargs = {
+            kwargs: dict = {
                 "path": r["path"],
                 "project_number": r["project_number"],
                 "owner": r.get("owner"),
@@ -84,6 +85,17 @@ def load_config(path: Path) -> Config:
             }
             if "columns" in r:
                 kwargs["columns"] = r["columns"]
+            # Per-repo overrides (stored as raw dicts for merge)
+            if "agents_dir" in r:
+                kwargs["agents_dir"] = r["agents_dir"]
+            if "workflows_dir" in r:
+                kwargs["workflows_dir"] = r["workflows_dir"]
+            if "defaults" in r:
+                kwargs["defaults"] = r["defaults"]
+            if "workflow_selection" in r:
+                kwargs["workflow_selection"] = r["workflow_selection"]
+            if "model_roles" in r:
+                kwargs["model_roles"] = r["model_roles"]
             repos.append(RepoConfig(**kwargs))
         except KeyError as e:
             raise ConfigError(f"Missing required key in repos[{i}]: {e}") from None
@@ -111,4 +123,59 @@ def load_config(path: Path) -> Config:
         repos=repos,
         defaults=defaults,
         workflow_selection=workflow_selection,
+    )
+
+
+def resolve_repo_config(repo: RepoConfig, global_cfg: Config) -> ResolvedRepoConfig:
+    """Merge per-repo overrides with global config. Pure function.
+
+    Resolution order:
+    1. Start with global values
+    2. Repo-level values override global (shallow merge for dicts)
+    3. For nested dicts (label_map, model_roles, priority_overrides),
+       repo keys override global keys with the same name
+    """
+    # --- model_roles: shallow dict merge ---
+    if repo.model_roles is not None:
+        merged_mr = {**global_cfg.model_roles, **repo.model_roles}
+    else:
+        merged_mr = dict(global_cfg.model_roles)
+
+    # --- workflow_selection: field-level + dict merge ---
+    gws = global_cfg.workflow_selection
+    if repo.workflow_selection is not None:
+        rws = repo.workflow_selection
+        merged_ws = WorkflowSelectionConfig(
+            default=rws.get("default", gws.default),
+            label_map={**gws.label_map, **rws.get("label_map", {})},
+            priority_overrides={**gws.priority_overrides, **rws.get("priority_overrides", {})},
+        )
+    else:
+        merged_ws = WorkflowSelectionConfig(
+            default=gws.default,
+            label_map=dict(gws.label_map),
+            priority_overrides=dict(gws.priority_overrides),
+        )
+
+    # --- defaults: shallow dict merge ---
+    gd = global_cfg.defaults
+    base = {f: getattr(gd, f) for f in Defaults.__dataclass_fields__}
+    if repo.defaults is not None:
+        # Only override keys the user explicitly set in YAML
+        for k, v in repo.defaults.items():
+            if k in Defaults.__dataclass_fields__:
+                base[k] = v
+    # Top-level agents_dir / workflows_dir override defaults-level ones
+    if repo.agents_dir is not None:
+        base["agents_dir"] = repo.agents_dir
+    if repo.workflows_dir is not None:
+        base["workflows_dir"] = repo.workflows_dir
+    merged_defaults = Defaults(**base)
+
+    return ResolvedRepoConfig(
+        telegram=global_cfg.telegram,
+        model_roles=merged_mr,
+        defaults=merged_defaults,
+        workflow_selection=merged_ws,
+        version=global_cfg.version,
     )
