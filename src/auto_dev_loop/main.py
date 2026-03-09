@@ -197,7 +197,11 @@ async def run_poll_cycle(
         completed = await store.list_terminal_issue_keys()
         state.completed_keys.update(completed)
 
-        resolved = resolve_repo_config(repo_cfg, config)
+        try:
+            resolved = resolve_repo_config(repo_cfg, config)
+        except Exception as exc:
+            log.error("Skipping repo %s — invalid per-repo config: %s", repo_cfg.path, exc)
+            continue
         source_column = repo_cfg.columns.get("source", "Ready for Dev")
 
         try:

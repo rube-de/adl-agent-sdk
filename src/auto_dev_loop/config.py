@@ -144,6 +144,11 @@ def resolve_repo_config(repo: RepoConfig, global_cfg: Config) -> ResolvedRepoCon
     """
     # --- model_roles: shallow dict merge ---
     if repo.model_roles is not None:
+        if not isinstance(repo.model_roles, dict):
+            raise ConfigError(
+                f"Per-repo model_roles must be a mapping, "
+                f"got {type(repo.model_roles).__name__} in {repo.path}"
+            )
         merged_mr = {**global_cfg.model_roles, **repo.model_roles}
     else:
         merged_mr = dict(global_cfg.model_roles)
@@ -157,10 +162,22 @@ def resolve_repo_config(repo: RepoConfig, global_cfg: Config) -> ResolvedRepoCon
                 f"got {type(repo.workflow_selection).__name__} in {repo.path}"
             )
         rws = repo.workflow_selection
+        repo_label_map = rws.get("label_map", {})
+        if not isinstance(repo_label_map, dict):
+            raise ConfigError(
+                f"Per-repo workflow_selection.label_map must be a mapping, "
+                f"got {type(repo_label_map).__name__} in {repo.path}"
+            )
+        repo_priority = rws.get("priority_overrides", {})
+        if not isinstance(repo_priority, dict):
+            raise ConfigError(
+                f"Per-repo workflow_selection.priority_overrides must be a mapping, "
+                f"got {type(repo_priority).__name__} in {repo.path}"
+            )
         merged_ws = WorkflowSelectionConfig(
             default=rws.get("default", gws.default),
-            label_map={**gws.label_map, **rws.get("label_map", {})},
-            priority_overrides={**gws.priority_overrides, **rws.get("priority_overrides", {})},
+            label_map={**gws.label_map, **repo_label_map},
+            priority_overrides={**gws.priority_overrides, **repo_priority},
         )
     else:
         merged_ws = WorkflowSelectionConfig(
@@ -170,8 +187,13 @@ def resolve_repo_config(repo: RepoConfig, global_cfg: Config) -> ResolvedRepoCon
         )
 
     # --- defaults: shallow dict merge ---
+    # Copy mutable fields (lists) so the resolved config is independent
+    # of the global config — preserves the "pure function" contract.
     gd = global_cfg.defaults
-    base = {f: getattr(gd, f) for f in Defaults.__dataclass_fields__}
+    base = {}
+    for f in Defaults.__dataclass_fields__:
+        val = getattr(gd, f)
+        base[f] = list(val) if isinstance(val, list) else val
     if repo.defaults is not None:
         if not isinstance(repo.defaults, dict):
             raise ConfigError(
