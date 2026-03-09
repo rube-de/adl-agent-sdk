@@ -80,7 +80,10 @@ class TelegramBot:
                 thread_id = result.message_thread_id
                 self._thread_cache[repo] = thread_id
                 if self._store:
-                    await self._store.store_thread_id(repo, thread_id)
+                    try:
+                        await self._store.store_thread_id(repo, thread_id)
+                    except Exception as db_exc:
+                        log.warning("Failed to persist thread ID for %s: %s", repo, db_exc)
                 return thread_id
             except RetryAfter as exc:
                 log.warning(
@@ -97,7 +100,10 @@ class TelegramBot:
                 thread_id = result.message_thread_id
                 self._thread_cache[repo] = thread_id
                 if self._store:
-                    await self._store.store_thread_id(repo, thread_id)
+                    try:
+                        await self._store.store_thread_id(repo, thread_id)
+                    except Exception as db_exc:
+                        log.warning("Failed to persist thread ID for %s: %s", repo, db_exc)
                 return thread_id
             except (BotApiError, httpx.HTTPError, OSError, ValueError) as exc:
                 log.warning(
