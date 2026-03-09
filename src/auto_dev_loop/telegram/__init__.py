@@ -60,6 +60,16 @@ class TelegramBot:
         self._thread_cache: dict[str, int | None] = {}
         self._thread_locks: dict[str, asyncio.Lock] = {}
 
+    async def _cache_and_store_thread(self, repo: str, thread_id: int) -> int:
+        """Cache thread_id in memory and persist to store (non-fatal on DB error)."""
+        self._thread_cache[repo] = thread_id
+        if self._store:
+            try:
+                await self._store.store_thread_id(repo, thread_id)
+            except Exception as db_exc:
+                log.warning("Failed to persist thread ID for %s: %s", repo, db_exc)
+        return thread_id
+
     async def _resolve_thread_id(self, repo: str) -> int | None:
         """Return the forum topic thread ID for *repo*, or None if topics disabled."""
         if not self._config.use_topics:
@@ -76,15 +86,12 @@ class TelegramBot:
                     if stored is not None:
                         self._thread_cache[repo] = stored
                         return stored
+                # Note: create_forum_topic intentionally bypasses the
+                # rate-limited TelegramClient. Topic creation is a
+                # once-per-repo operation (cached immediately), and
+                # the RetryAfter handler here provides its own backoff.
                 result = await self._api.create_forum_topic(self._chat_id, repo)
-                thread_id = result.message_thread_id
-                self._thread_cache[repo] = thread_id
-                if self._store:
-                    try:
-                        await self._store.store_thread_id(repo, thread_id)
-                    except Exception as db_exc:
-                        log.warning("Failed to persist thread ID for %s: %s", repo, db_exc)
-                return thread_id
+                return await self._cache_and_store_thread(repo, result.message_thread_id)
             except RetryAfter as exc:
                 log.warning(
                     "Rate-limited creating topic for %s, retrying after %ss",
@@ -93,18 +100,11 @@ class TelegramBot:
                 await asyncio.sleep(exc.retry_after)
                 try:
                     result = await self._api.create_forum_topic(self._chat_id, repo)
-                except (BotApiError, httpx.HTTPError, OSError, ValueError) as retry_exc:
+                except (BotApiError, RetryAfter, httpx.HTTPError, OSError, ValueError) as retry_exc:
                     log.warning("Retry failed for %s: %s", repo, retry_exc)
                     self._thread_cache[repo] = None
                     return None
-                thread_id = result.message_thread_id
-                self._thread_cache[repo] = thread_id
-                if self._store:
-                    try:
-                        await self._store.store_thread_id(repo, thread_id)
-                    except Exception as db_exc:
-                        log.warning("Failed to persist thread ID for %s: %s", repo, db_exc)
-                return thread_id
+                return await self._cache_and_store_thread(repo, result.message_thread_id)
             except (BotApiError, httpx.HTTPError, OSError, ValueError) as exc:
                 log.warning(
                     "Failed to create forum topic for %s, sending without topic: %s",
