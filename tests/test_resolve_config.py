@@ -1,6 +1,10 @@
 """Tests for per-repo config resolution (merge logic)."""
 
-from auto_dev_loop.config import resolve_repo_config
+import logging
+
+import pytest
+
+from auto_dev_loop.config import ConfigError, resolve_repo_config
 from auto_dev_loop.models import (
     Config,
     Defaults,
@@ -160,14 +164,73 @@ def test_repo_workflow_selection_only_label_map():
     }
 
 
-def test_repo_defaults_ignores_unknown_keys():
-    """Unknown keys in repo defaults dict are silently ignored."""
+def test_repo_defaults_warns_on_unknown_keys(caplog):
+    """Unknown keys in repo defaults dict log a warning."""
     gcfg = _make_global_config()
     repo = RepoConfig(
         path="/tmp/repo",
         project_number=1,
         defaults={"max_dev_cycles": 2, "not_a_real_field": 999},
     )
-    resolved = resolve_repo_config(repo, gcfg)
+    with caplog.at_level(logging.WARNING, logger="auto_dev_loop.config"):
+        resolved = resolve_repo_config(repo, gcfg)
     assert resolved.defaults.max_dev_cycles == 2
     assert not hasattr(resolved.defaults, "not_a_real_field")
+    assert "not_a_real_field" in caplog.text
+
+
+def test_repo_priority_overrides_merge():
+    """Per-repo priority_overrides are merged with global ones."""
+    gcfg = _make_global_config(
+        workflow_selection=WorkflowSelectionConfig(
+            default="feature",
+            label_map={"bug": "bug_fix"},
+            priority_overrides={"P0": {"default": "hotfix"}},
+        ),
+    )
+    repo = RepoConfig(
+        path="/tmp/repo",
+        project_number=1,
+        workflow_selection={
+            "priority_overrides": {"P1": {"default": "standard"}},
+        },
+    )
+    resolved = resolve_repo_config(repo, gcfg)
+    assert resolved.workflow_selection.priority_overrides == {
+        "P0": {"default": "hotfix"},      # from global
+        "P1": {"default": "standard"},     # from repo
+    }
+
+
+def test_repo_list_defaults_replaced_wholesale():
+    """List-valued defaults are replaced, not appended."""
+    gcfg = _make_global_config()
+    repo = RepoConfig(
+        path="/tmp/repo",
+        project_number=1,
+        defaults={"external_reviewers": ["codex", "gemini"]},
+    )
+    resolved = resolve_repo_config(repo, gcfg)
+    assert resolved.defaults.external_reviewers == ["codex", "gemini"]
+
+
+def test_workflow_selection_not_a_dict_raises():
+    gcfg = _make_global_config()
+    repo = RepoConfig(
+        path="/tmp/repo",
+        project_number=1,
+        workflow_selection="bad",
+    )
+    with pytest.raises(ConfigError, match="must be a mapping"):
+        resolve_repo_config(repo, gcfg)
+
+
+def test_defaults_not_a_dict_raises():
+    gcfg = _make_global_config()
+    repo = RepoConfig(
+        path="/tmp/repo",
+        project_number=1,
+        defaults="bad",
+    )
+    with pytest.raises(ConfigError, match="must be a mapping"):
+        resolve_repo_config(repo, gcfg)

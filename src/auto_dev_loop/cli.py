@@ -64,7 +64,7 @@ def validate(
                 continue
             try:
                 resolve_repo_config(repo_cfg, cfg)
-            except (TypeError, KeyError, ValueError) as e:
+            except (TypeError, KeyError, ValueError, AttributeError, ConfigError) as e:
                 raise ConfigError(f"Invalid per-repo override in repos[{i}] ({repo_cfg.path}): {e}")
         typer.echo(f"Config OK: {len(cfg.repos)} repo(s), version {cfg.version}")
     except ConfigError as e:

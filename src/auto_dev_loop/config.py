@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from pathlib import Path
@@ -16,6 +17,9 @@ from .models import (
     TelegramConfig,
     WorkflowSelectionConfig,
 )
+
+
+log = logging.getLogger(__name__)
 
 
 class ConfigError(Exception):
@@ -134,6 +138,9 @@ def resolve_repo_config(repo: RepoConfig, global_cfg: Config) -> ResolvedRepoCon
     2. Repo-level values override global (shallow merge for dicts)
     3. For nested dicts (label_map, model_roles, priority_overrides),
        repo keys override global keys with the same name
+
+    List-valued defaults (``review_backoff``, ``external_reviewers``, etc.)
+    are replaced wholesale by the repo override — not appended/merged.
     """
     # --- model_roles: shallow dict merge ---
     if repo.model_roles is not None:
@@ -144,6 +151,11 @@ def resolve_repo_config(repo: RepoConfig, global_cfg: Config) -> ResolvedRepoCon
     # --- workflow_selection: field-level + dict merge ---
     gws = global_cfg.workflow_selection
     if repo.workflow_selection is not None:
+        if not isinstance(repo.workflow_selection, dict):
+            raise ConfigError(
+                f"Per-repo workflow_selection must be a mapping, "
+                f"got {type(repo.workflow_selection).__name__} in {repo.path}"
+            )
         rws = repo.workflow_selection
         merged_ws = WorkflowSelectionConfig(
             default=rws.get("default", gws.default),
@@ -161,10 +173,21 @@ def resolve_repo_config(repo: RepoConfig, global_cfg: Config) -> ResolvedRepoCon
     gd = global_cfg.defaults
     base = {f: getattr(gd, f) for f in Defaults.__dataclass_fields__}
     if repo.defaults is not None:
-        # Only override keys the user explicitly set in YAML
+        if not isinstance(repo.defaults, dict):
+            raise ConfigError(
+                f"Per-repo defaults must be a mapping, "
+                f"got {type(repo.defaults).__name__} in {repo.path}"
+            )
+        valid_keys = set(Defaults.__dataclass_fields__)
         for k, v in repo.defaults.items():
-            if k in Defaults.__dataclass_fields__:
+            if k in valid_keys:
                 base[k] = v
+            else:
+                log.warning(
+                    "Ignoring unrecognized per-repo defaults key %r in %s "
+                    "(valid keys: %s)",
+                    k, repo.path, ", ".join(sorted(valid_keys)),
+                )
     # Top-level agents_dir / workflows_dir override defaults-level ones
     if repo.agents_dir is not None:
         base["agents_dir"] = repo.agents_dir

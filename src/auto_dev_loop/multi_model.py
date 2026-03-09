@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .agent_query import agent_query
-from .models import AgentDef, Config, ReviewVerdict, VERDICT_APPROVED, VERDICT_NEEDS_REVISION
+from .models import AgentDef, AppConfig, ReviewVerdict, VERDICT_APPROVED, VERDICT_NEEDS_REVISION
 from .review_parser import parse_review_verdict, synthesize_reviews
 
 log = logging.getLogger(__name__)
@@ -62,7 +62,7 @@ async def multi_model_review(
     plan: str,
     diff: str,
     agents: dict[str, AgentDef],
-    config: Config,
+    config: AppConfig,
 ) -> MultiModelReviewResult:
     """Run parallel multi-model review. Conservative: any rejection = reject."""
     review_prompt = build_review_prompt(plan, diff)

@@ -12,7 +12,7 @@ from pathlib import Path
 from ._paths import ADL_CONFIG, ADL_HOME, repo_slug, repo_state_dir
 from .config import load_config, resolve_repo_config
 from .issue_logging import IssueLogger
-from .models import Config, Issue, RepoConfig, ResolvedRepoConfig
+from .models import AppConfig, Config, Issue, RepoConfig
 from .orchestrator import IssueState, process_issue
 from .poller import poll_project_issues
 from .state import StateStore
@@ -108,7 +108,7 @@ def _make_issue_logger(issue: Issue, logs_dir: Path) -> IssueLogger:
 
 async def _process_issue_task(
     issue: Issue,
-    config: Config | ResolvedRepoConfig,
+    config: AppConfig,
     repo_path: Path,
     key: str,
     state: DaemonState,

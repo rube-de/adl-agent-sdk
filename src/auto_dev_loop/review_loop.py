@@ -11,7 +11,7 @@ from .agent_loader import load_agents
 from .agent_query import agent_query
 from .comments import fetch_pr_comments, parse_review_comments, filter_actionable, format_for_agent
 from .hooks import CommandGuard
-from .models import Config, Issue
+from .models import AppConfig, Issue
 from .pr_status import check_pr_status
 
 log = logging.getLogger(__name__)
@@ -72,7 +72,7 @@ async def review_loop(
     issue: Issue,
     pr_number: int,
     worktree: Path,
-    config: Config,
+    config: AppConfig,
     guard: CommandGuard | None = None,
 ) -> ReviewLoopResult:
     """Iterate on PR review comments until approved or max cycles."""

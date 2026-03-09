@@ -14,7 +14,7 @@ from .models import (
     VERDICT_APPROVED,
     VERDICT_NEEDS_REVISION,
     VERDICT_TESTS_PASSING,
-    Config,
+    AppConfig,
     Issue,
     ReviewVerdict,
     fence_untrusted,
@@ -39,7 +39,7 @@ class OrchestratorDispatcher(StageDispatcher):
     def __init__(
         self,
         agents: dict,
-        config: Config,
+        config: AppConfig,
         worktree: Path,
         guard: CommandGuard | None,
         telegram: TelegramBot | None,
