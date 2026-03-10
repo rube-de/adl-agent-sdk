@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ._paths import ADL_CONFIG, ADL_HOME, repo_slug, repo_state_dir
-from .config import load_config, resolve_repo_config
+from .config import ConfigError, load_config, resolve_repo_config
 from .issue_logging import IssueLogger
 from .models import AppConfig, Config, Issue, RepoConfig
 from .orchestrator import IssueState, process_issue
@@ -199,7 +199,7 @@ async def run_poll_cycle(
 
         try:
             resolved = resolve_repo_config(repo_cfg, config)
-        except Exception as exc:
+        except ConfigError as exc:
             log.error("Skipping repo %s — invalid per-repo config: %s", repo_cfg.path, exc)
             continue
         source_column = repo_cfg.columns.get("source", "Ready for Dev")

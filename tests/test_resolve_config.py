@@ -56,14 +56,39 @@ def test_repo_agents_dir_overrides_global():
     gcfg = _make_global_config()
     repo = RepoConfig(path="/tmp/repo", project_number=1, agents_dir="./custom-agents")
     resolved = resolve_repo_config(repo, gcfg)
-    assert resolved.defaults.agents_dir == "./custom-agents"
+    # Relative path is rebased against repo.path
+    assert resolved.defaults.agents_dir == "/tmp/repo/custom-agents"
 
 
 def test_repo_workflows_dir_overrides_global():
     gcfg = _make_global_config()
     repo = RepoConfig(path="/tmp/repo", project_number=1, workflows_dir="./custom-wf")
     resolved = resolve_repo_config(repo, gcfg)
-    assert resolved.defaults.workflows_dir == "./custom-wf"
+    assert resolved.defaults.workflows_dir == "/tmp/repo/custom-wf"
+
+
+def test_repo_absolute_path_override_unchanged():
+    """Absolute path overrides are not rebased."""
+    gcfg = _make_global_config()
+    repo = RepoConfig(
+        path="/tmp/repo", project_number=1,
+        agents_dir="/opt/shared-agents",
+        workflows_dir="/opt/shared-workflows",
+    )
+    resolved = resolve_repo_config(repo, gcfg)
+    assert resolved.defaults.agents_dir == "/opt/shared-agents"
+    assert resolved.defaults.workflows_dir == "/opt/shared-workflows"
+
+
+def test_repo_defaults_relative_path_rebased():
+    """Relative paths set via repo.defaults dict are also rebased."""
+    gcfg = _make_global_config()
+    repo = RepoConfig(
+        path="/tmp/repo", project_number=1,
+        defaults={"workflows_dir": "my-workflows"},
+    )
+    resolved = resolve_repo_config(repo, gcfg)
+    assert resolved.defaults.workflows_dir == "/tmp/repo/my-workflows"
 
 
 def test_repo_defaults_shallow_merge():
@@ -126,8 +151,8 @@ def test_repo_defaults_with_agents_dir_override():
         defaults={"max_dev_cycles": 2, "agents_dir": "./from-defaults"},
     )
     resolved = resolve_repo_config(repo, gcfg)
-    # Top-level agents_dir overrides the one set in defaults
-    assert resolved.defaults.agents_dir == "./special-agents"
+    # Top-level agents_dir overrides the one set in defaults (rebased)
+    assert resolved.defaults.agents_dir == "/tmp/repo/special-agents"
     assert resolved.defaults.max_dev_cycles == 2
 
 
@@ -234,3 +259,58 @@ def test_defaults_not_a_dict_raises():
     )
     with pytest.raises(ConfigError, match="must be a mapping"):
         resolve_repo_config(repo, gcfg)
+
+
+def test_priority_overrides_inner_value_not_a_dict_raises():
+    """Inner values of priority_overrides must be dicts."""
+    gcfg = _make_global_config()
+    repo = RepoConfig(
+        path="/tmp/repo",
+        project_number=1,
+        workflow_selection={
+            "priority_overrides": {"P0": "bad_string"},
+        },
+    )
+    with pytest.raises(ConfigError, match=r"priority_overrides\['P0'\].*must be a mapping"):
+        resolve_repo_config(repo, gcfg)
+
+
+def test_resolve_is_pure_priority_overrides_inner_dicts():
+    """Inner dicts of priority_overrides are deep-copied — mutation doesn't leak."""
+    gcfg = _make_global_config(
+        workflow_selection=WorkflowSelectionConfig(
+            default="feature",
+            label_map={"bug": "bug_fix"},
+            priority_overrides={"P0": {"default": "hotfix"}},
+        ),
+    )
+    repo = RepoConfig(
+        path="/tmp/repo",
+        project_number=1,
+        workflow_selection={
+            "priority_overrides": {"P1": {"default": "standard"}},
+        },
+    )
+    resolved = resolve_repo_config(repo, gcfg)
+
+    # Mutate the resolved inner dict
+    resolved.workflow_selection.priority_overrides["P0"]["default"] = "MUTATED"
+
+    # Global config must be unaffected
+    assert gcfg.workflow_selection.priority_overrides["P0"]["default"] == "hotfix"
+
+
+def test_resolve_no_override_deep_copies_priority_overrides():
+    """Even without repo overrides, inner dicts of priority_overrides are independent."""
+    gcfg = _make_global_config(
+        workflow_selection=WorkflowSelectionConfig(
+            default="feature",
+            label_map={},
+            priority_overrides={"P0": {"default": "hotfix"}},
+        ),
+    )
+    repo = RepoConfig(path="/tmp/repo", project_number=1)
+    resolved = resolve_repo_config(repo, gcfg)
+
+    resolved.workflow_selection.priority_overrides["P0"]["default"] = "MUTATED"
+    assert gcfg.workflow_selection.priority_overrides["P0"]["default"] == "hotfix"

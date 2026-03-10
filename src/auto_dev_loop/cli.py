@@ -110,6 +110,20 @@ def validate(
                     err=True,
                 )
 
+            # Validate agents_dir is accessible
+            agents_dir = Path(resolved.defaults.agents_dir)
+            if not agents_dir.is_absolute():
+                repo_path = Path(repo_cfg.path)
+                if repo_path.is_dir():
+                    agents_dir = repo_path / agents_dir
+            if not agents_dir.is_dir():
+                typer.echo(
+                    f"  Warning: repos[{i}] ({repo_cfg.path}): "
+                    f"agents dir '{agents_dir}' not found — "
+                    f"agent loading may fail at runtime",
+                    err=True,
+                )
+
         typer.echo(f"Config OK: {len(cfg.repos)} repo(s), version {cfg.version}")
     except ConfigError as e:
         typer.echo(f"Config error: {e}", err=True)

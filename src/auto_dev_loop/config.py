@@ -174,16 +174,22 @@ def resolve_repo_config(repo: RepoConfig, global_cfg: Config) -> ResolvedRepoCon
                 f"Per-repo workflow_selection.priority_overrides must be a mapping, "
                 f"got {type(repo_priority).__name__} in {repo.path}"
             )
+        for prio_key, prio_val in repo_priority.items():
+            if not isinstance(prio_val, dict):
+                raise ConfigError(
+                    f"Per-repo workflow_selection.priority_overrides[{prio_key!r}] "
+                    f"must be a mapping, got {type(prio_val).__name__} in {repo.path}"
+                )
         merged_ws = WorkflowSelectionConfig(
             default=rws.get("default", gws.default),
             label_map={**gws.label_map, **repo_label_map},
-            priority_overrides={**gws.priority_overrides, **repo_priority},
+            priority_overrides={k: dict(v) for k, v in {**gws.priority_overrides, **repo_priority}.items()},
         )
     else:
         merged_ws = WorkflowSelectionConfig(
             default=gws.default,
             label_map=dict(gws.label_map),
-            priority_overrides=dict(gws.priority_overrides),
+            priority_overrides={k: dict(v) for k, v in gws.priority_overrides.items()},
         )
 
     # --- defaults: shallow dict merge ---
@@ -215,6 +221,16 @@ def resolve_repo_config(repo: RepoConfig, global_cfg: Config) -> ResolvedRepoCon
         base["agents_dir"] = repo.agents_dir
     if repo.workflows_dir is not None:
         base["workflows_dir"] = repo.workflows_dir
+
+    # Rebase relative path overrides against repo.path so they resolve
+    # correctly regardless of daemon CWD.
+    _PATH_FIELDS = {"agents_dir", "workflows_dir"}
+    for pf in _PATH_FIELDS:
+        if pf in base and base[pf] != getattr(gd, pf):
+            p = Path(base[pf])
+            if not p.is_absolute():
+                base[pf] = str(Path(repo.path) / p)
+
     merged_defaults = Defaults(**base)
 
     return ResolvedRepoConfig(
