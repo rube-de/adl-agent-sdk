@@ -162,12 +162,24 @@ def resolve_repo_config(repo: RepoConfig, global_cfg: Config) -> ResolvedRepoCon
                 f"got {type(repo.workflow_selection).__name__} in {repo.path}"
             )
         rws = repo.workflow_selection
+        repo_default = rws.get("default", gws.default)
+        if not isinstance(repo_default, str):
+            raise ConfigError(
+                f"Per-repo workflow_selection.default must be a string, "
+                f"got {type(repo_default).__name__} in {repo.path}"
+            )
         repo_label_map = rws.get("label_map", {})
         if not isinstance(repo_label_map, dict):
             raise ConfigError(
                 f"Per-repo workflow_selection.label_map must be a mapping, "
                 f"got {type(repo_label_map).__name__} in {repo.path}"
             )
+        for label_key, label_val in repo_label_map.items():
+            if not isinstance(label_val, str):
+                raise ConfigError(
+                    f"Per-repo workflow_selection.label_map[{label_key!r}] "
+                    f"must be a string, got {type(label_val).__name__} in {repo.path}"
+                )
         repo_priority = rws.get("priority_overrides", {})
         if not isinstance(repo_priority, dict):
             raise ConfigError(

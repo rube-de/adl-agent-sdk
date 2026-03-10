@@ -199,7 +199,7 @@ async def run_poll_cycle(
 
         try:
             resolved = resolve_repo_config(repo_cfg, config)
-        except ConfigError as exc:
+        except (ConfigError, TypeError, ValueError) as exc:
             log.error("Skipping repo %s — invalid per-repo config: %s", repo_cfg.path, exc)
             continue
         source_column = repo_cfg.columns.get("source", "Ready for Dev")
