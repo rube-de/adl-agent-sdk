@@ -209,7 +209,7 @@ def resolve_repo_config(repo: RepoConfig, global_cfg: Config) -> ResolvedRepoCon
         valid_keys = set(Defaults.__dataclass_fields__)
         for k, v in repo.defaults.items():
             if k in valid_keys:
-                base[k] = v
+                base[k] = list(v) if isinstance(v, list) else v
             else:
                 log.warning(
                     "Ignoring unrecognized per-repo defaults key %r in %s "
@@ -227,7 +227,13 @@ def resolve_repo_config(repo: RepoConfig, global_cfg: Config) -> ResolvedRepoCon
     _PATH_FIELDS = {"agents_dir", "workflows_dir"}
     for pf in _PATH_FIELDS:
         if pf in base and base[pf] != getattr(gd, pf):
-            p = Path(base[pf])
+            raw_path = base[pf]
+            if not isinstance(raw_path, str):
+                raise ConfigError(
+                    f"Per-repo {pf} must be a path string, "
+                    f"got {type(raw_path).__name__} in {repo.path}"
+                )
+            p = Path(raw_path)
             if not p.is_absolute():
                 base[pf] = str(Path(repo.path) / p)
 

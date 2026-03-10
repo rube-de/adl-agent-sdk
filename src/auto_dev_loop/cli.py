@@ -70,10 +70,6 @@ def validate(
 
             # Validate workflow_selection references against available workflows
             wf_dir = Path(resolved.defaults.workflows_dir)
-            if not wf_dir.is_absolute():
-                repo_path = Path(repo_cfg.path)
-                if repo_path.is_dir():
-                    wf_dir = repo_path / wf_dir
             if wf_dir.is_dir():
                 try:
                     workflows = load_all_workflows(wf_dir)
@@ -112,10 +108,6 @@ def validate(
 
             # Validate agents_dir is accessible
             agents_dir = Path(resolved.defaults.agents_dir)
-            if not agents_dir.is_absolute():
-                repo_path = Path(repo_cfg.path)
-                if repo_path.is_dir():
-                    agents_dir = repo_path / agents_dir
             if not agents_dir.is_dir():
                 typer.echo(
                     f"  Warning: repos[{i}] ({repo_cfg.path}): "
