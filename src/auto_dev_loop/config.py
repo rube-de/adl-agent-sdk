@@ -136,8 +136,10 @@ def resolve_repo_config(repo: RepoConfig, global_cfg: Config) -> ResolvedRepoCon
     Resolution order:
     1. Start with global values
     2. Repo-level values override global (shallow merge for dicts)
-    3. For nested dicts (label_map, model_roles, priority_overrides),
-       repo keys override global keys with the same name
+    3. For nested dicts (label_map, model_roles), repo keys override
+       global keys with the same name
+    4. priority_overrides are deep-merged per priority key — repo labels
+       override matching global labels without dropping unrelated ones
 
     List-valued defaults (``review_backoff``, ``external_reviewers``, etc.)
     are replaced wholesale by the repo override — not appended/merged.
@@ -192,10 +194,18 @@ def resolve_repo_config(repo: RepoConfig, global_cfg: Config) -> ResolvedRepoCon
                     f"Per-repo workflow_selection.priority_overrides[{prio_key!r}] "
                     f"must be a mapping, got {type(prio_val).__name__} in {repo.path}"
                 )
+        # Deep-merge priority_overrides per priority key so repo overrides
+        # only replace matching labels, not the entire priority bucket.
+        merged_po = {k: dict(v) for k, v in gws.priority_overrides.items()}
+        for prio_key, prio_val in repo_priority.items():
+            if prio_key in merged_po:
+                merged_po[prio_key].update(prio_val)
+            else:
+                merged_po[prio_key] = dict(prio_val)
         merged_ws = WorkflowSelectionConfig(
             default=rws.get("default", gws.default),
             label_map={**gws.label_map, **repo_label_map},
-            priority_overrides={k: dict(v) for k, v in {**gws.priority_overrides, **repo_priority}.items()},
+            priority_overrides=merged_po,
         )
     else:
         merged_ws = WorkflowSelectionConfig(
@@ -228,26 +238,35 @@ def resolve_repo_config(repo: RepoConfig, global_cfg: Config) -> ResolvedRepoCon
                     "(valid keys: %s)",
                     k, repo.path, ", ".join(sorted(valid_keys)),
                 )
-    # Top-level agents_dir / workflows_dir override defaults-level ones
+    # Top-level agents_dir / workflows_dir override defaults-level ones.
+    # Track which path fields were explicitly overridden so we can rebase
+    # them against repo.path — value equality is insufficient because a
+    # repo may explicitly set the same value as the global default.
+    _PATH_FIELDS = {"agents_dir", "workflows_dir"}
+    _overridden_paths: set[str] = set()
+    if repo.defaults is not None:
+        for k in repo.defaults:
+            if k in _PATH_FIELDS and k in base:
+                _overridden_paths.add(k)
     if repo.agents_dir is not None:
         base["agents_dir"] = repo.agents_dir
+        _overridden_paths.add("agents_dir")
     if repo.workflows_dir is not None:
         base["workflows_dir"] = repo.workflows_dir
+        _overridden_paths.add("workflows_dir")
 
     # Rebase relative path overrides against repo.path so they resolve
     # correctly regardless of daemon CWD.
-    _PATH_FIELDS = {"agents_dir", "workflows_dir"}
-    for pf in _PATH_FIELDS:
-        if pf in base and base[pf] != getattr(gd, pf):
-            raw_path = base[pf]
-            if not isinstance(raw_path, str):
-                raise ConfigError(
-                    f"Per-repo {pf} must be a path string, "
-                    f"got {type(raw_path).__name__} in {repo.path}"
-                )
-            p = Path(raw_path)
-            if not p.is_absolute():
-                base[pf] = str(Path(repo.path) / p)
+    for pf in _overridden_paths:
+        raw_path = base[pf]
+        if not isinstance(raw_path, str):
+            raise ConfigError(
+                f"Per-repo {pf} must be a path string, "
+                f"got {type(raw_path).__name__} in {repo.path}"
+            )
+        p = Path(raw_path)
+        if not p.is_absolute():
+            base[pf] = str(Path(repo.path) / p)
 
     merged_defaults = Defaults(**base)
 
