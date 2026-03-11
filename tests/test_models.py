@@ -3,13 +3,18 @@
 from auto_dev_loop.models import (
     AgentDef,
     Config,
+    Defaults,
     Issue,
     PlanResult,
     DevResult,
+    RepoConfig,
+    ResolvedRepoConfig,
     ReviewIteration,
     ReviewVerdict,
     StageState,
+    TelegramConfig,
     WorkflowResult,
+    WorkflowSelectionConfig,
     VERDICT_APPROVED,
 )
 
@@ -79,3 +84,38 @@ def test_config_defaults():
     )
     assert cfg.defaults.poll_interval == 60
     assert cfg.defaults.max_dev_cycles == 5
+
+
+def test_repo_config_override_fields_default_none():
+    rc = RepoConfig(path="/tmp/repo", project_number=1)
+    assert rc.agents_dir is None
+    assert rc.workflows_dir is None
+    assert rc.defaults is None
+    assert rc.workflow_selection is None
+    assert rc.model_roles is None
+
+
+def test_repo_config_with_overrides():
+    rc = RepoConfig(
+        path="/tmp/repo",
+        project_number=1,
+        agents_dir="./custom-agents",
+        defaults={"max_dev_cycles": 3},
+        model_roles={"slow": "claude-opus-4-5"},
+    )
+    assert rc.agents_dir == "./custom-agents"
+    assert rc.defaults["max_dev_cycles"] == 3
+    assert rc.model_roles["slow"] == "claude-opus-4-5"
+
+
+def test_resolved_repo_config():
+    tg = TelegramConfig(bot_token="tok", chat_id=1)
+    resolved = ResolvedRepoConfig(
+        telegram=tg,
+        model_roles={"default": "sonnet"},
+        defaults=Defaults(),
+        workflow_selection=WorkflowSelectionConfig(),
+    )
+    assert resolved.defaults.poll_interval == 60
+    assert resolved.model_roles["default"] == "sonnet"
+    assert resolved.version == 3

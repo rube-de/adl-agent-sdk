@@ -8,7 +8,7 @@ from pathlib import Path
 from .agent_loader import load_agents
 from .agent_query import agent_query
 from .hooks import CommandGuard
-from .models import Config, Issue, PlanResult, fence_untrusted
+from .models import AppConfig, Issue, PlanResult, fence_untrusted
 from .review_parser import parse_review_verdict
 
 log = logging.getLogger(__name__)
@@ -38,7 +38,7 @@ def build_architect_prompt(
 async def plan_loop(
     issue: Issue,
     worktree: Path,
-    config: Config,
+    config: AppConfig,
     guard: CommandGuard | None = None,
 ) -> PlanResult:
     """Run the plan loop: architect -> reviewer -> iterate until approved."""

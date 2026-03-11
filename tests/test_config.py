@@ -139,3 +139,60 @@ defaults:
     assert cfg.defaults.max_dev_cycles == 10
     # Unset defaults should still have their default values
     assert cfg.defaults.max_plan_iterations == 3
+
+
+def test_load_config_with_repo_overrides(tmp_config_file: Path):
+    """Per-repo override fields are parsed from YAML."""
+    config_text = """\
+version: 3
+telegram:
+  bot_token: "tok"
+  chat_id: 1
+model_roles:
+  default: sonnet
+repos:
+  - path: /tmp/repo-a
+    project_number: 1
+  - path: /tmp/repo-b
+    project_number: 2
+    agents_dir: ./custom-agents
+    workflows_dir: ./custom-workflows
+    defaults:
+      max_dev_cycles: 3
+    workflow_selection:
+      default: security_audit
+      label_map:
+        feature: security_feature
+    model_roles:
+      slow: claude-opus-4-5
+"""
+    tmp_config_file.write_text(config_text)
+    cfg = load_config(tmp_config_file)
+
+    # Repo A: no overrides
+    repo_a = cfg.repos[0]
+    assert repo_a.agents_dir is None
+    assert repo_a.defaults is None
+
+    # Repo B: has overrides
+    repo_b = cfg.repos[1]
+    assert repo_b.agents_dir == "./custom-agents"
+    assert repo_b.workflows_dir == "./custom-workflows"
+    assert repo_b.defaults == {"max_dev_cycles": 3}
+    assert repo_b.workflow_selection == {
+        "default": "security_audit",
+        "label_map": {"feature": "security_feature"},
+    }
+    assert repo_b.model_roles == {"slow": "claude-opus-4-5"}
+
+
+def test_load_config_repo_without_overrides_unchanged(tmp_config_file: Path):
+    """Repos without overrides behave identically to current behavior."""
+    tmp_config_file.write_text(MINIMAL_CONFIG)
+    cfg = load_config(tmp_config_file)
+    repo = cfg.repos[0]
+    assert repo.agents_dir is None
+    assert repo.workflows_dir is None
+    assert repo.defaults is None
+    assert repo.workflow_selection is None
+    assert repo.model_roles is None

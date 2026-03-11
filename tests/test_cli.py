@@ -81,6 +81,23 @@ def test_cli_add_invokes_wizard(monkeypatch, tmp_path: Path):
     assert called["config_path"] == config_path
 
 
+def test_cli_validate_catches_bad_repo_overrides(tmp_path: Path):
+    """adl validate reports per-repo override errors."""
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        "version: 3\n"
+        "telegram:\n  bot_token: tok\n  chat_id: 1\n"
+        "model_roles:\n  default: sonnet\n"
+        "repos:\n"
+        "  - path: /tmp/repo\n"
+        "    project_number: 1\n"
+        "    workflow_selection: bad_string\n"
+    )
+    result = runner.invoke(app, ["validate", "--config", str(cfg)])
+    assert result.exit_code == 1
+    assert "per-repo override" in result.output.lower() or "must be a mapping" in result.output.lower()
+
+
 def test_cli_add_defaults_to_cwd_when_no_path(monkeypatch, tmp_path: Path):
     called: dict[str, object] = {}
 

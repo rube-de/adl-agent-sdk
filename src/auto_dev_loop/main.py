@@ -10,9 +10,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ._paths import ADL_CONFIG, ADL_HOME, repo_slug, repo_state_dir
-from .config import load_config
+from .config import ConfigError, load_config, resolve_repo_config
 from .issue_logging import IssueLogger
-from .models import Config, Issue, RepoConfig
+from .models import AppConfig, Config, Issue, RepoConfig
 from .orchestrator import IssueState, process_issue
 from .poller import poll_project_issues
 from .state import StateStore
@@ -108,7 +108,7 @@ def _make_issue_logger(issue: Issue, logs_dir: Path) -> IssueLogger:
 
 async def _process_issue_task(
     issue: Issue,
-    config: Config,
+    config: AppConfig,
     repo_path: Path,
     key: str,
     state: DaemonState,
@@ -197,6 +197,11 @@ async def run_poll_cycle(
         completed = await store.list_terminal_issue_keys()
         state.completed_keys.update(completed)
 
+        try:
+            resolved = resolve_repo_config(repo_cfg, config)
+        except (ConfigError, TypeError, ValueError) as exc:
+            log.error("Skipping repo %s — invalid per-repo config: %s", repo_cfg.path, exc)
+            continue
         source_column = repo_cfg.columns.get("source", "Ready for Dev")
 
         try:
@@ -222,7 +227,7 @@ async def run_poll_cycle(
                 try:
                     await _process_issue_task(
                         issue,
-                        config,
+                        resolved,
                         Path(repo_cfg.path),
                         key,
                         state,
@@ -241,7 +246,7 @@ async def run_poll_cycle(
 
             task = asyncio.create_task(
                 _process_issue_task(
-                    issue, config, Path(repo_cfg.path), key, state, slug, store
+                    issue, resolved, Path(repo_cfg.path), key, state, slug, store
                 ),
                 name=f"adl:{key}",
             )

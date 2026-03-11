@@ -141,6 +141,12 @@ class RepoConfig:
     })
     owner: str | None = None
     repo: str | None = None
+    # Per-repo overrides (None = use global)
+    agents_dir: str | None = None
+    workflows_dir: str | None = None
+    defaults: dict | None = None
+    workflow_selection: dict | None = None
+    model_roles: dict[str, str] | None = None
 
 
 @dataclass
@@ -168,3 +174,24 @@ class Config:
     version: int = 3
     defaults: Defaults = field(default_factory=Defaults)
     workflow_selection: WorkflowSelectionConfig = field(default_factory=WorkflowSelectionConfig)
+
+
+@dataclass
+class ResolvedRepoConfig:
+    """Per-repo config with all global+repo overrides merged.
+
+    Shares the same attribute interface as ``Config`` (minus ``repos``)
+    so downstream consumers work unchanged.  Use the ``AppConfig`` type
+    alias when accepting either type.
+    """
+    telegram: dict | TelegramConfig
+    model_roles: dict[str, str]
+    defaults: Defaults
+    workflow_selection: WorkflowSelectionConfig
+    version: int = 3
+
+
+#: Type alias for config objects accepted by downstream consumers.
+#: Both ``Config`` (global) and ``ResolvedRepoConfig`` (per-repo merged)
+#: expose the same attribute interface (defaults, model_roles, etc.).
+AppConfig = Config | ResolvedRepoConfig

@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 
 from .hooks import CommandGuard, create_default_guard
-from .models import AgentDef, Config, Issue
+from .models import AgentDef, AppConfig, Issue
 from .model_roles import resolve_model
 
 log = logging.getLogger(__name__)
@@ -15,7 +15,7 @@ log = logging.getLogger(__name__)
 def build_query_options(
     agent_def: AgentDef,
     worktree: Path,
-    config: Config,
+    config: AppConfig,
     guard: CommandGuard | None = None,
 ) -> dict:
     """Build options dict for SDK query() call."""
@@ -43,7 +43,7 @@ async def agent_query(
     agent_def: AgentDef,
     prompt: str,
     worktree: Path,
-    config: Config,
+    config: AppConfig,
     issue: Issue | None = None,
     guard: CommandGuard | None = None,
 ) -> str:

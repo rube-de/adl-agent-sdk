@@ -51,12 +51,83 @@ def validate(
         "--config", "-c",
         help="Path to config YAML file.",
     ),
+    strict: bool = typer.Option(
+        False, "--strict",
+        help="Exit with code 2 when warnings are emitted (useful for CI).",
+    ),
 ) -> None:
     """Validate config, agents, and workflows."""
-    from .config import load_config, ConfigError
+    from .config import load_config, resolve_repo_config, ConfigError
+    from .models import RepoConfig
+    from .workflow_loader import load_all_workflows, WorkflowLoadError
+
+    warnings: list[str] = []
 
     try:
         cfg = load_config(config)
+        # Validate per-repo overrides by resolving each repo
+        for i, repo_cfg in enumerate(cfg.repos):
+            if not isinstance(repo_cfg, RepoConfig):
+                continue
+            try:
+                resolved = resolve_repo_config(repo_cfg, cfg)
+            except (TypeError, KeyError, ValueError, AttributeError, ConfigError) as e:
+                raise ConfigError(f"Invalid per-repo override in repos[{i}] ({repo_cfg.path}): {e}")
+
+            # Validate workflow_selection references against available workflows
+            wf_dir = Path(resolved.defaults.workflows_dir)
+            if wf_dir.is_dir():
+                try:
+                    workflows = load_all_workflows(wf_dir)
+                except WorkflowLoadError as e:
+                    raise ConfigError(f"repos[{i}] ({repo_cfg.path}): workflow load error: {e}")
+                wf_ids = set(workflows)
+                ws = resolved.workflow_selection
+                if ws.default not in wf_ids:
+                    raise ConfigError(
+                        f"repos[{i}] ({repo_cfg.path}): workflow_selection.default "
+                        f"'{ws.default}' not found in {wf_dir} "
+                        f"(available: {', '.join(sorted(wf_ids)) or 'none'})"
+                    )
+                for label, wf_id in ws.label_map.items():
+                    if wf_id not in wf_ids:
+                        raise ConfigError(
+                            f"repos[{i}] ({repo_cfg.path}): workflow_selection.label_map "
+                            f"'{label}' references unknown workflow '{wf_id}' "
+                            f"(available: {', '.join(sorted(wf_ids))})"
+                        )
+                for prio, overrides in ws.priority_overrides.items():
+                    for label, wf_id in overrides.items():
+                        if wf_id not in wf_ids:
+                            raise ConfigError(
+                                f"repos[{i}] ({repo_cfg.path}): "
+                                f"workflow_selection.priority_overrides.{prio}.{label} "
+                                f"references unknown workflow '{wf_id}' "
+                                f"(available: {', '.join(sorted(wf_ids))})"
+                            )
+            else:
+                warnings.append(
+                    f"  Warning: repos[{i}] ({repo_cfg.path}): "
+                    f"workflows dir '{wf_dir}' not found — skipping workflow reference check"
+                )
+
+            # Validate agents_dir is accessible
+            agents_dir = Path(resolved.defaults.agents_dir)
+            if not agents_dir.is_dir():
+                warnings.append(
+                    f"  Warning: repos[{i}] ({repo_cfg.path}): "
+                    f"agents dir '{agents_dir}' not found — "
+                    f"agent loading may fail at runtime"
+                )
+
+        for w in warnings:
+            typer.echo(w, err=True)
+        if warnings and strict:
+            typer.echo(
+                f"Config validated with {len(warnings)} warning(s).",
+                err=True,
+            )
+            raise typer.Exit(2)
         typer.echo(f"Config OK: {len(cfg.repos)} repo(s), version {cfg.version}")
     except ConfigError as e:
         typer.echo(f"Config error: {e}", err=True)
