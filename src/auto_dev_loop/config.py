@@ -81,6 +81,21 @@ def load_config(path: Path) -> Config:
     repos = []
     for i, r in enumerate(raw.get("repos", [])):
         try:
+            if not isinstance(r, dict):
+                raise ConfigError(
+                    f"repos[{i}] must be a mapping, got {type(r).__name__}"
+                )
+            _ALLOWED_REPO_KEYS = {
+                "path", "project_number", "owner", "repo", "columns",
+                "agents_dir", "workflows_dir", "defaults",
+                "workflow_selection", "model_roles",
+            }
+            unexpected = set(r) - _ALLOWED_REPO_KEYS
+            if unexpected:
+                raise ConfigError(
+                    f"Unrecognized key(s) in repos[{i}]: "
+                    f"{', '.join(sorted(unexpected))}"
+                )
             kwargs: dict = {
                 "path": r["path"],
                 "project_number": r["project_number"],
@@ -151,6 +166,12 @@ def resolve_repo_config(repo: RepoConfig, global_cfg: Config) -> ResolvedRepoCon
                 f"Per-repo model_roles must be a mapping, "
                 f"got {type(repo.model_roles).__name__} in {repo.path}"
             )
+        for role, model_id in repo.model_roles.items():
+            if not isinstance(role, str) or not isinstance(model_id, str):
+                raise ConfigError(
+                    f"Per-repo model_roles entries must map strings to strings "
+                    f"in {repo.path}"
+                )
         merged_mr = {**global_cfg.model_roles, **repo.model_roles}
     else:
         merged_mr = dict(global_cfg.model_roles)
@@ -164,6 +185,14 @@ def resolve_repo_config(repo: RepoConfig, global_cfg: Config) -> ResolvedRepoCon
                 f"got {type(repo.workflow_selection).__name__} in {repo.path}"
             )
         rws = repo.workflow_selection
+        _KNOWN_WS_KEYS = {"default", "label_map", "priority_overrides"}
+        for key in rws:
+            if key not in _KNOWN_WS_KEYS:
+                log.warning(
+                    "Ignoring unrecognized per-repo workflow_selection key %r in %s "
+                    "(valid keys: %s)",
+                    key, repo.path, ", ".join(sorted(_KNOWN_WS_KEYS)),
+                )
         repo_default = rws.get("default", gws.default)
         if not isinstance(repo_default, str):
             raise ConfigError(

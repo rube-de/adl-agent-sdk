@@ -51,11 +51,17 @@ def validate(
         "--config", "-c",
         help="Path to config YAML file.",
     ),
+    strict: bool = typer.Option(
+        False, "--strict",
+        help="Exit with code 2 when warnings are emitted (useful for CI).",
+    ),
 ) -> None:
     """Validate config, agents, and workflows."""
     from .config import load_config, resolve_repo_config, ConfigError
     from .models import RepoConfig
     from .workflow_loader import load_all_workflows, WorkflowLoadError
+
+    warnings: list[str] = []
 
     try:
         cfg = load_config(config)
@@ -100,22 +106,28 @@ def validate(
                                 f"(available: {', '.join(sorted(wf_ids))})"
                             )
             else:
-                typer.echo(
+                warnings.append(
                     f"  Warning: repos[{i}] ({repo_cfg.path}): "
-                    f"workflows dir '{wf_dir}' not found — skipping workflow reference check",
-                    err=True,
+                    f"workflows dir '{wf_dir}' not found — skipping workflow reference check"
                 )
 
             # Validate agents_dir is accessible
             agents_dir = Path(resolved.defaults.agents_dir)
             if not agents_dir.is_dir():
-                typer.echo(
+                warnings.append(
                     f"  Warning: repos[{i}] ({repo_cfg.path}): "
                     f"agents dir '{agents_dir}' not found — "
-                    f"agent loading may fail at runtime",
-                    err=True,
+                    f"agent loading may fail at runtime"
                 )
 
+        for w in warnings:
+            typer.echo(w, err=True)
+        if warnings and strict:
+            typer.echo(
+                f"Config validated with {len(warnings)} warning(s).",
+                err=True,
+            )
+            raise typer.Exit(2)
         typer.echo(f"Config OK: {len(cfg.repos)} repo(s), version {cfg.version}")
     except ConfigError as e:
         typer.echo(f"Config error: {e}", err=True)
