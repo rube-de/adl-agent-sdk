@@ -9,7 +9,9 @@ from auto_dev_loop.dispatcher import OrchestratorDispatcher, build_branch_name
 from auto_dev_loop.models import (
     AgentDef, Config, Defaults, Issue, TelegramConfig, WorkflowSelectionConfig,
     VERDICT_APPROVED,
+    ReviewVerdict,
 )
+from auto_dev_loop.multi_model import MultiModelReviewResult
 from auto_dev_loop.workflow_loader import StageConfig
 
 
@@ -186,7 +188,6 @@ async def test_escalate_to_human_no_telegram():
     """Without Telegram, escalation auto-approves."""
     d = _dispatcher(telegram=None)
     stage = StageConfig(ref="review", agent="reviewer")
-    from auto_dev_loop.models import ReviewVerdict
     result = await d.escalate_to_human(
         _issue(), stage, ReviewVerdict(approved=False, feedback="bad"), "iteration_cap",
     )
@@ -210,8 +211,27 @@ async def test_escalate_to_human_with_telegram():
     mock_tg.escalate.return_value = MagicMock(action="reject")
     d = _dispatcher(telegram=mock_tg)
     stage = StageConfig(ref="review", agent="reviewer")
-    from auto_dev_loop.models import ReviewVerdict
     result = await d.escalate_to_human(
         _issue(), stage, ReviewVerdict(approved=False, feedback="bad"), "iteration_cap",
     )
     assert result == "reject"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_multi_review_passes_stage_reviewers():
+    """dispatch_multi_review should pass stage.reviewers to multi_model_review."""
+    d = _dispatcher()
+    stage = StageConfig(ref="multi_review", agent="reviewer", reviewers=["gemini", "codex"])
+    prior = {"plan": "the plan", "dev": f"the diff\n\n{VERDICT_APPROVED}"}
+
+    mock_result = MultiModelReviewResult(
+        verdict=ReviewVerdict(approved=True, feedback=None),
+        individual=[],
+    )
+
+    with patch("auto_dev_loop.dispatcher.multi_model_review", new_callable=AsyncMock, return_value=mock_result) as mock_mmr:
+        await d.dispatch_multi_review(stage, _issue(), prior)
+
+    mock_mmr.assert_called_once()
+    call_kwargs = mock_mmr.call_args.kwargs
+    assert call_kwargs["reviewers_override"] == ["gemini", "codex"]
