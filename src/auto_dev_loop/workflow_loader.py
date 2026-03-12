@@ -42,6 +42,19 @@ class WorkflowConfig:
     stages: list[StageConfig]
 
 
+def _parse_reviewers(raw: object, stage_ref: str) -> list[str]:
+    """Normalize and validate the ``reviewers`` field from YAML."""
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        return [raw]
+    if not isinstance(raw, list):
+        raise WorkflowLoadError(f"Stage '{stage_ref}': reviewers must be a list, got {type(raw).__name__}")
+    if not all(isinstance(r, str) for r in raw):
+        raise WorkflowLoadError(f"Stage '{stage_ref}': all reviewers entries must be strings")
+    return raw
+
+
 def load_workflow(path: Path) -> WorkflowConfig:
     """Load a workflow from a YAML file."""
     try:
@@ -69,7 +82,7 @@ def load_workflow(path: Path) -> WorkflowConfig:
             loopTarget=s.get("loopTarget"),
             maxIterations=s.get("maxIterations", 3),
             canVeto=s.get("canVeto", False),
-            reviewers=s.get("reviewers", []),
+            reviewers=_parse_reviewers(s.get("reviewers", []), s["ref"]),
             team=team,
         ))
 

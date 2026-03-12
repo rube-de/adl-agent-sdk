@@ -140,6 +140,30 @@ def test_load_reviewers(tmp_workflows_dir: Path):
     assert wf.stages[3].reviewers == ["claude", "gemini", "codex"]
 
 
+def test_load_reviewers_scalar_string_normalized(tmp_workflows_dir: Path):
+    """A scalar ``reviewers: gemini`` in YAML is normalized to ``['gemini']``."""
+    yaml_text = BUG_FIX_YAML.replace("reviewers: [claude, gemini, codex]", "reviewers: gemini")
+    (tmp_workflows_dir / "scalar.yaml").write_text(yaml_text)
+    wf = load_workflow(tmp_workflows_dir / "scalar.yaml")
+    assert wf.stages[3].reviewers == ["gemini"]
+
+
+def test_load_reviewers_invalid_type_raises(tmp_workflows_dir: Path):
+    """A non-string, non-list reviewers value raises WorkflowLoadError."""
+    yaml_text = BUG_FIX_YAML.replace("reviewers: [claude, gemini, codex]", "reviewers: 42")
+    (tmp_workflows_dir / "bad_type.yaml").write_text(yaml_text)
+    with pytest.raises(WorkflowLoadError, match="reviewers must be a list"):
+        load_workflow(tmp_workflows_dir / "bad_type.yaml")
+
+
+def test_load_reviewers_non_string_entries_raises(tmp_workflows_dir: Path):
+    """Reviewers list with non-string entries raises WorkflowLoadError."""
+    yaml_text = BUG_FIX_YAML.replace("reviewers: [claude, gemini, codex]", "reviewers: [gemini, 123]")
+    (tmp_workflows_dir / "bad_entry.yaml").write_text(yaml_text)
+    with pytest.raises(WorkflowLoadError, match="must be strings"):
+        load_workflow(tmp_workflows_dir / "bad_entry.yaml")
+
+
 def test_load_all_workflows(tmp_workflows_dir: Path):
     (tmp_workflows_dir / "bug_fix.yaml").write_text(BUG_FIX_YAML)
     (tmp_workflows_dir / "feature.yaml").write_text(FEATURE_YAML)

@@ -161,8 +161,8 @@ async def test_stage_reviewers_override_config():
 
 
 @pytest.mark.asyncio
-async def test_stage_reviewers_override_empty_uses_config():
-    """When reviewers_override is empty, fall back to config.defaults.external_reviewers."""
+async def test_stage_reviewers_override_empty_disables_external():
+    """When reviewers_override is [], no external reviewers run (only internal)."""
     called_external = []
 
     async def mock_query(agent_def, prompt, worktree, config, **kw):
@@ -183,8 +183,8 @@ async def test_stage_reviewers_override_empty_uses_config():
                 reviewers_override=[],
             )
 
-    # Empty override -> fall back to config (which has ["gemini"])
-    assert called_external == ["gemini"]
+    # Empty list explicitly means "no external reviewers"
+    assert called_external == []
 
 
 @pytest.mark.asyncio
