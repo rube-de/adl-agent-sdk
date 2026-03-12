@@ -70,10 +70,15 @@ async def multi_model_review(
 ) -> MultiModelReviewResult:
     """Run parallel multi-model review. Conservative: any rejection = reject.
 
-    When *reviewers_override* is a non-empty list, it replaces the external
-    reviewers from ``config.defaults.external_reviewers``.  The ``claude``
-    entry (if present) is handled separately — it always uses ``agent_query``
-    against the bundled reviewer agent, not an external subprocess.
+    The internal Claude reviewer (via ``agent_query``) always runs regardless
+    of *reviewers_override*.  When *reviewers_override* is not ``None``, it
+    replaces ``config.defaults.external_reviewers`` as the source of external
+    reviewer commands.  Any ``"claude"`` entries in the override are filtered
+    out since they would duplicate the always-present internal review.
+
+    Passing ``None`` (the default) uses config defaults; passing an empty list
+    also falls back to config defaults (use-case: ``stage.reviewers`` defaults
+    to ``[]`` in ``StageConfig``).
     """
     review_prompt = build_review_prompt(plan, diff)
 
@@ -83,9 +88,12 @@ async def multi_model_review(
         else config.defaults.external_reviewers
     )
 
-    # "claude" is the internal reviewer via agent_query — filter it out of
-    # external list since agent_query always runs as the first task.
+    # Filter INTERNAL_REVIEWER from external list — it runs unconditionally
+    # via agent_query as tasks[0].  N.B. the result loop at line ~108 relies
+    # on index 0 being the internal reviewer.
     external_reviewers = [r for r in effective_reviewers if r != INTERNAL_REVIEWER]
+    if not external_reviewers:
+        log.info("No external reviewers; review will use only the internal %s reviewer", INTERNAL_REVIEWER)
     review_timeout = config.defaults.external_review_timeout
 
     tasks = [
