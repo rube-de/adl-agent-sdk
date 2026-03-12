@@ -15,6 +15,7 @@ from ruamel.yaml import YAML, YAMLError
 
 from ._paths import ADL_CONFIG
 from .bundled import BUNDLED_AGENTS_DIR, BUNDLED_WORKFLOWS_DIR
+from .models import Defaults
 
 
 class AddRepoError(Exception):
@@ -533,8 +534,8 @@ def run_add_wizard(
         "owner": owner,
         "repo": repo,
         "columns": columns,
-        "agents_dir": "./agents",
-        "workflows_dir": "./workflows",
+        "agents_dir": Defaults.agents_dir,
+        "workflows_dir": Defaults.workflows_dir,
     }
     try:
         append_repo_config(config_path, entry)

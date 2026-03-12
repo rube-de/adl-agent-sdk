@@ -24,6 +24,7 @@ from auto_dev_loop.add_repo import (
     scaffold_files,
 )
 from auto_dev_loop.bundled import BUNDLED_AGENTS_DIR, BUNDLED_WORKFLOWS_DIR
+from auto_dev_loop.config import load_config, resolve_repo_config
 
 
 def test_bundled_agents_dir_exists():
@@ -568,8 +569,6 @@ class TestRunAddWizard:
         )
 
         run_add_wizard(repo_path, cfg_path)
-
-        from auto_dev_loop.config import load_config, resolve_repo_config
 
         config = load_config(cfg_path)
         resolved = resolve_repo_config(config.repos[0], config)
