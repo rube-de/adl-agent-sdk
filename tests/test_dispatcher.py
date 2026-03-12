@@ -255,3 +255,22 @@ async def test_dispatch_multi_review_no_reviewers_passes_none():
 
     call_kwargs = mock_mmr.call_args.kwargs
     assert call_kwargs["reviewers_override"] is None
+
+
+@pytest.mark.asyncio
+async def test_dispatch_multi_review_empty_reviewers_passes_empty_list():
+    """When stage has reviewers=[], reviewers_override should be [] (no externals)."""
+    d = _dispatcher()
+    stage = StageConfig(ref="multi_review", agent="reviewer", reviewers=[])
+    prior = {"plan": "the plan", "dev": f"the diff\n\n{VERDICT_TESTS_PASSING}\n{VERDICT_APPROVED}"}
+
+    mock_result = MultiModelReviewResult(
+        verdict=ReviewVerdict(approved=True, feedback=None),
+        individual=[],
+    )
+
+    with patch("auto_dev_loop.dispatcher.multi_model_review", new_callable=AsyncMock, return_value=mock_result) as mock_mmr:
+        await d.dispatch_multi_review(stage, _issue(), prior)
+
+    call_kwargs = mock_mmr.call_args.kwargs
+    assert call_kwargs["reviewers_override"] == []

@@ -52,7 +52,7 @@ def _parse_reviewers(raw: object, stage_ref: str) -> list[str] | None:
         raise WorkflowLoadError(f"Stage '{stage_ref}': reviewers must be a list, got {type(raw).__name__}")
     if not all(isinstance(r, str) for r in raw):
         raise WorkflowLoadError(f"Stage '{stage_ref}': all reviewers entries must be strings")
-    return raw
+    return list(raw)
 
 
 def load_workflow(path: Path) -> WorkflowConfig:
