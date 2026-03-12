@@ -140,6 +140,14 @@ def test_load_reviewers(tmp_workflows_dir: Path):
     assert wf.stages[3].reviewers == ["claude", "gemini", "codex"]
 
 
+def test_load_reviewers_empty_list(tmp_workflows_dir: Path):
+    """Explicit ``reviewers: []`` in YAML yields empty list (no external reviewers)."""
+    yaml_text = BUG_FIX_YAML.replace("reviewers: [claude, gemini, codex]", "reviewers: []")
+    (tmp_workflows_dir / "empty.yaml").write_text(yaml_text)
+    wf = load_workflow(tmp_workflows_dir / "empty.yaml")
+    assert wf.stages[3].reviewers == []
+
+
 def test_load_reviewers_scalar_string_normalized(tmp_workflows_dir: Path):
     """A scalar ``reviewers: gemini`` in YAML is normalized to ``['gemini']``."""
     yaml_text = BUG_FIX_YAML.replace("reviewers: [claude, gemini, codex]", "reviewers: gemini")
