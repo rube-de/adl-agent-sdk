@@ -180,6 +180,22 @@ def test_load_reviewers_empty_string_raises(tmp_workflows_dir: Path):
         load_workflow(tmp_workflows_dir / "empty_str.yaml")
 
 
+def test_load_reviewers_whitespace_only_raises(tmp_workflows_dir: Path):
+    """Whitespace-only reviewer entry raises WorkflowLoadError."""
+    yaml_text = BUG_FIX_YAML.replace("reviewers: [claude, gemini, codex]", 'reviewers: [gemini, "  "]')
+    (tmp_workflows_dir / "ws.yaml").write_text(yaml_text)
+    with pytest.raises(WorkflowLoadError, match="non-empty strings"):
+        load_workflow(tmp_workflows_dir / "ws.yaml")
+
+
+def test_load_reviewers_strips_whitespace(tmp_workflows_dir: Path):
+    """Padded reviewer names are stripped at load time."""
+    yaml_text = BUG_FIX_YAML.replace("reviewers: [claude, gemini, codex]", 'reviewers: ["  gemini  ", codex]')
+    (tmp_workflows_dir / "padded.yaml").write_text(yaml_text)
+    wf = load_workflow(tmp_workflows_dir / "padded.yaml")
+    assert wf.stages[3].reviewers == ["gemini", "codex"]
+
+
 def test_load_all_workflows(tmp_workflows_dir: Path):
     (tmp_workflows_dir / "bug_fix.yaml").write_text(BUG_FIX_YAML)
     (tmp_workflows_dir / "feature.yaml").write_text(FEATURE_YAML)
