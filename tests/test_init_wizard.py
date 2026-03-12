@@ -123,8 +123,9 @@ def test_run_init_wizard_group_chat_without_topics(tmp_path: Path, monkeypatch) 
 
 
 def test_build_config_data_hardcoded_token() -> None:
+    test_bot_token = "test-bot-token"  # noqa: S105
     config_data = build_config_data(
-        bot_token="my-secret-token",
+        bot_token=test_bot_token,
         chat_id=12345,
         chat_type="private",
         use_topics=False,
@@ -133,25 +134,27 @@ def test_build_config_data_hardcoded_token() -> None:
         defaults=dict(DEFAULT_TUNABLE_DEFAULTS),
     )
 
-    assert config_data["telegram"]["bot_token"] == "my-secret-token"
+    assert config_data["telegram"]["bot_token"] == test_bot_token
 
 
 def test_run_init_wizard_hardcoded_token(tmp_path: Path, monkeypatch, capsys) -> None:
+    test_bot_token = "test-bot-token"  # noqa: S105
     config_path = tmp_path / "config.yaml"
 
-    _patch_prompt_sequence(monkeypatch, ["my-secret-token", 424242])
+    _patch_prompt_sequence(monkeypatch, [test_bot_token, 424242])
     # use_topics=False, use_env_token=False, model_defaults=True, daemon_defaults=True
     _patch_confirm_sequence(monkeypatch, [False, False, True, True])
 
     run_init_wizard(config_path)
 
     cfg_yaml = yaml.safe_load(config_path.read_text())
-    assert cfg_yaml["telegram"]["bot_token"] == "my-secret-token"
+    assert cfg_yaml["telegram"]["bot_token"] == test_bot_token
 
     cfg = load_config(config_path)
     assert cfg.telegram.chat_id == 424242
 
     captured = capsys.readouterr()
+    assert "Config written to" in captured.out
     assert TELEGRAM_BOT_TOKEN_ENV not in captured.out
 
 
