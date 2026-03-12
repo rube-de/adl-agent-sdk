@@ -533,6 +533,8 @@ def run_add_wizard(
         "owner": owner,
         "repo": repo,
         "columns": columns,
+        "agents_dir": "./agents",
+        "workflows_dir": "./workflows",
     }
     try:
         append_repo_config(config_path, entry)

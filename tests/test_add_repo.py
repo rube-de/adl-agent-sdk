@@ -372,6 +372,8 @@ class TestRunAddWizard:
         assert entry["owner"] == "acme"
         assert entry["columns"]["source"] == "Ready for Dev"
         assert entry["repo"] == "my-app"
+        assert entry["agents_dir"] == "./agents"
+        assert entry["workflows_dir"] == "./workflows"
 
     @patch("auto_dev_loop.add_repo.check_gh_available")
     @patch("auto_dev_loop.add_repo.detect_github_remote")
