@@ -47,11 +47,13 @@ def _parse_reviewers(raw: object, stage_ref: str) -> list[str] | None:
     if raw is None:
         return None
     if isinstance(raw, str):
+        if not raw:
+            raise WorkflowLoadError(f"Stage '{stage_ref}': reviewer name must not be empty")
         return [raw]
     if not isinstance(raw, list):
         raise WorkflowLoadError(f"Stage '{stage_ref}': reviewers must be a list, got {type(raw).__name__}")
-    if not all(isinstance(r, str) for r in raw):
-        raise WorkflowLoadError(f"Stage '{stage_ref}': all reviewers entries must be strings")
+    if not all(isinstance(r, str) and r for r in raw):
+        raise WorkflowLoadError(f"Stage '{stage_ref}': all reviewers entries must be non-empty strings")
     return list(raw)
 
 

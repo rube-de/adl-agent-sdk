@@ -160,8 +160,16 @@ def test_load_reviewers_non_string_entries_raises(tmp_workflows_dir: Path):
     """Reviewers list with non-string entries raises WorkflowLoadError."""
     yaml_text = BUG_FIX_YAML.replace("reviewers: [claude, gemini, codex]", "reviewers: [gemini, 123]")
     (tmp_workflows_dir / "bad_entry.yaml").write_text(yaml_text)
-    with pytest.raises(WorkflowLoadError, match="must be strings"):
+    with pytest.raises(WorkflowLoadError, match="must be non-empty strings"):
         load_workflow(tmp_workflows_dir / "bad_entry.yaml")
+
+
+def test_load_reviewers_empty_string_raises(tmp_workflows_dir: Path):
+    """Empty string in reviewers list raises WorkflowLoadError."""
+    yaml_text = BUG_FIX_YAML.replace("reviewers: [claude, gemini, codex]", 'reviewers: [gemini, ""]')
+    (tmp_workflows_dir / "empty_str.yaml").write_text(yaml_text)
+    with pytest.raises(WorkflowLoadError, match="non-empty strings"):
+        load_workflow(tmp_workflows_dir / "empty_str.yaml")
 
 
 def test_load_all_workflows(tmp_workflows_dir: Path):
