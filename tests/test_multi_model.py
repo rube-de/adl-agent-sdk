@@ -213,3 +213,31 @@ async def test_stage_reviewers_claude_filtered_from_external():
     assert result.verdict.approved is True
     # "claude" should NOT appear in external calls — it's the internal reviewer
     assert called_external == ["codex"]
+
+
+@pytest.mark.asyncio
+async def test_stage_reviewers_claude_only_no_external():
+    """When reviewers_override=['claude'], zero external subprocesses should run."""
+    called_external = []
+
+    async def mock_query(agent_def, prompt, worktree, config, **kw):
+        return VERDICT_APPROVED
+
+    async def mock_external(cmd, prompt, worktree, timeout):
+        called_external.append(cmd)
+        return VERDICT_APPROVED
+
+    with patch("auto_dev_loop.multi_model.agent_query", side_effect=mock_query):
+        with patch("auto_dev_loop.multi_model.run_external_with_timeout", side_effect=mock_external):
+            result = await multi_model_review(
+                worktree=Path("/tmp/wt"),
+                plan="plan",
+                diff="diff",
+                agents=_agents(),
+                config=_config(),
+                reviewers_override=["claude"],
+            )
+
+    assert result.verdict.approved is True
+    assert called_external == []
+    assert len(result.individual) == 1

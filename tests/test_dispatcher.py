@@ -9,6 +9,7 @@ from auto_dev_loop.dispatcher import OrchestratorDispatcher, build_branch_name
 from auto_dev_loop.models import (
     AgentDef, Config, Defaults, Issue, TelegramConfig, WorkflowSelectionConfig,
     VERDICT_APPROVED,
+    VERDICT_TESTS_PASSING,
     ReviewVerdict,
 )
 from auto_dev_loop.multi_model import MultiModelReviewResult
@@ -222,7 +223,7 @@ async def test_dispatch_multi_review_passes_stage_reviewers():
     """dispatch_multi_review should pass stage.reviewers to multi_model_review."""
     d = _dispatcher()
     stage = StageConfig(ref="multi_review", agent="reviewer", reviewers=["gemini", "codex"])
-    prior = {"plan": "the plan", "dev": f"the diff\n\n{VERDICT_APPROVED}"}
+    prior = {"plan": "the plan", "dev": f"the diff\n\n{VERDICT_TESTS_PASSING}\n{VERDICT_APPROVED}"}
 
     mock_result = MultiModelReviewResult(
         verdict=ReviewVerdict(approved=True, feedback=None),
