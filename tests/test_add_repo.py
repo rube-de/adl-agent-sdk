@@ -539,3 +539,39 @@ class TestRunAddWizard:
             "done": "Shipped",
         }
         assert entry["repo"] == "my-app"
+
+    @patch("auto_dev_loop.add_repo.check_gh_available")
+    @patch("auto_dev_loop.add_repo.detect_github_remote")
+    @patch("auto_dev_loop.add_repo.list_gh_projects")
+    @patch("auto_dev_loop.add_repo.list_status_options")
+    @patch("auto_dev_loop.add_repo.scaffold_files")
+    def test_wizard_entry_resolves_correctly_in_multi_repo(
+        self,
+        mock_scaffold,
+        mock_status,
+        mock_projects,
+        mock_detect,
+        mock_gh_check,
+        tmp_path: Path,
+        monkeypatch,
+    ):
+        """Wizard-produced config entry resolves agents/workflows to repo-relative paths."""
+        cfg_path, repo_path = _setup_wizard_env(tmp_path)
+
+        mock_detect.return_value = ("acme", "my-app")
+        mock_projects.return_value = [{"number": 1, "title": "Board"}]
+        mock_status.return_value = ["Ready for Dev", "In Progress", "Done"]
+        mock_scaffold.return_value = []
+
+        monkeypatch.setattr(
+            "auto_dev_loop.add_repo.typer.confirm", lambda *a, **kw: True
+        )
+
+        run_add_wizard(repo_path, cfg_path)
+
+        from auto_dev_loop.config import load_config, resolve_repo_config
+
+        config = load_config(cfg_path)
+        resolved = resolve_repo_config(config.repos[0], config)
+        assert resolved.defaults.agents_dir == str(repo_path / "agents")
+        assert resolved.defaults.workflows_dir == str(repo_path / "workflows")
