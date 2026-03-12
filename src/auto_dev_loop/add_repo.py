@@ -514,9 +514,14 @@ def run_add_wizard(
             raise typer.Exit(1)
 
     # 8. Scaffold agents and workflows
+    defaults = Defaults()
     try:
-        agents_copied = scaffold_files(BUNDLED_AGENTS_DIR, resolved / "agents")
-        workflows_copied = scaffold_files(BUNDLED_WORKFLOWS_DIR, resolved / "workflows")
+        agents_copied = scaffold_files(
+            BUNDLED_AGENTS_DIR, resolved / Path(defaults.agents_dir)
+        )
+        workflows_copied = scaffold_files(
+            BUNDLED_WORKFLOWS_DIR, resolved / Path(defaults.workflows_dir)
+        )
     except OSError as exc:
         typer.echo(f"Failed to scaffold template files: {exc}", err=True)
         raise typer.Exit(1) from exc
@@ -534,8 +539,8 @@ def run_add_wizard(
         "owner": owner,
         "repo": repo,
         "columns": columns,
-        "agents_dir": Defaults.agents_dir,
-        "workflows_dir": Defaults.workflows_dir,
+        "agents_dir": defaults.agents_dir,
+        "workflows_dir": defaults.workflows_dir,
     }
     try:
         append_repo_config(config_path, entry)

@@ -368,13 +368,19 @@ class TestRunAddWizard:
         result = load_config_raw(cfg_path)
         assert len(result["repos"]) == 1
         entry = result["repos"][0]
-        assert entry["path"] == str(repo_path)
-        assert entry["project_number"] == 1
-        assert entry["owner"] == "acme"
-        assert entry["columns"]["source"] == "Ready for Dev"
-        assert entry["repo"] == "my-app"
-        assert entry["agents_dir"] == "./agents"
-        assert entry["workflows_dir"] == "./workflows"
+        assert entry == {
+            "path": str(repo_path),
+            "project_number": 1,
+            "owner": "acme",
+            "repo": "my-app",
+            "columns": {
+                "source": "Ready for Dev",
+                "in_progress": "In Progress",
+                "done": "Done",
+            },
+            "agents_dir": "./agents",
+            "workflows_dir": "./workflows",
+        }
 
     @patch("auto_dev_loop.add_repo.check_gh_available")
     @patch("auto_dev_loop.add_repo.detect_github_remote")
@@ -499,6 +505,8 @@ class TestRunAddWizard:
         assert entry["project_number"] == 5
         assert entry["owner"] == "acme"
         assert entry["repo"] == "my-app"
+        assert entry["agents_dir"] == "./agents"
+        assert entry["workflows_dir"] == "./workflows"
 
     @patch("auto_dev_loop.add_repo.check_gh_available")
     @patch("auto_dev_loop.add_repo.detect_github_remote")
@@ -540,13 +548,15 @@ class TestRunAddWizard:
             "done": "Shipped",
         }
         assert entry["repo"] == "my-app"
+        assert entry["agents_dir"] == "./agents"
+        assert entry["workflows_dir"] == "./workflows"
 
     @patch("auto_dev_loop.add_repo.check_gh_available")
     @patch("auto_dev_loop.add_repo.detect_github_remote")
     @patch("auto_dev_loop.add_repo.list_gh_projects")
     @patch("auto_dev_loop.add_repo.list_status_options")
     @patch("auto_dev_loop.add_repo.scaffold_files")
-    def test_wizard_entry_resolves_correctly_in_multi_repo(
+    def test_wizard_entry_resolves_paths_via_config_roundtrip(
         self,
         mock_scaffold,
         mock_status,
@@ -556,10 +566,13 @@ class TestRunAddWizard:
         tmp_path: Path,
         monkeypatch,
     ):
-        """Wizard-produced config entry resolves agents/workflows to repo-relative paths."""
+        """Wizard-produced config entries resolve agents/workflows to absolute paths under each repo root."""
         cfg_path, repo_path = _setup_wizard_env(tmp_path)
+        repo_path_2 = tmp_path / "my-app-2"
+        repo_path_2.mkdir()
+        (repo_path_2 / ".git").mkdir()
 
-        mock_detect.return_value = ("acme", "my-app")
+        mock_detect.side_effect = [("acme", "my-app"), ("acme", "my-app-2")]
         mock_projects.return_value = [{"number": 1, "title": "Board"}]
         mock_status.return_value = ["Ready for Dev", "In Progress", "Done"]
         mock_scaffold.return_value = []
@@ -569,8 +582,13 @@ class TestRunAddWizard:
         )
 
         run_add_wizard(repo_path, cfg_path)
+        run_add_wizard(repo_path_2, cfg_path)
 
         config = load_config(cfg_path)
-        resolved = resolve_repo_config(config.repos[0], config)
-        assert resolved.defaults.agents_dir == str(repo_path / "agents")
-        assert resolved.defaults.workflows_dir == str(repo_path / "workflows")
+        assert len(config.repos) == 2
+        resolved_1 = resolve_repo_config(config.repos[0], config)
+        resolved_2 = resolve_repo_config(config.repos[1], config)
+        assert resolved_1.defaults.agents_dir == str(repo_path / "agents")
+        assert resolved_1.defaults.workflows_dir == str(repo_path / "workflows")
+        assert resolved_2.defaults.agents_dir == str(repo_path_2 / "agents")
+        assert resolved_2.defaults.workflows_dir == str(repo_path_2 / "workflows")
