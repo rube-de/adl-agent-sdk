@@ -13,6 +13,9 @@ from .review_parser import parse_review_verdict, synthesize_reviews
 
 log = logging.getLogger(__name__)
 
+# Marker for the bundled internal reviewer (runs via agent_query, not subprocess).
+INTERNAL_REVIEWER = "claude"
+
 
 class AllReviewersFailedError(Exception):
     pass
@@ -63,10 +66,34 @@ async def multi_model_review(
     diff: str,
     agents: dict[str, AgentDef],
     config: AppConfig,
+    reviewers_override: list[str] | None = None,
 ) -> MultiModelReviewResult:
-    """Run parallel multi-model review. Conservative: any rejection = reject."""
+    """Run parallel multi-model review. Conservative: any rejection = reject.
+
+    The internal Claude reviewer (via ``agent_query``) always runs regardless
+    of *reviewers_override*.  When *reviewers_override* is not ``None``, it
+    replaces ``config.defaults.external_reviewers`` as the source of external
+    reviewer commands.  Any ``"claude"`` entries in either the override or the
+    config list are filtered out since they would duplicate the always-present
+    internal review.
+
+    Passing ``None`` (the default) uses config defaults; passing an empty list
+    disables external reviewers entirely (only the internal reviewer runs).
+    """
     review_prompt = build_review_prompt(plan, diff)
-    external_reviewers = config.defaults.external_reviewers
+
+    effective_reviewers = (
+        reviewers_override
+        if reviewers_override is not None
+        else config.defaults.external_reviewers
+    )
+
+    # Filter INTERNAL_REVIEWER from external list — it runs unconditionally
+    # via agent_query as tasks[0].  N.B. the result loop at line ~108 relies
+    # on index 0 being the internal reviewer.
+    external_reviewers = [r for r in effective_reviewers if r.lower() != INTERNAL_REVIEWER]
+    if not external_reviewers:
+        log.info("No external reviewers; review will use only the internal %s reviewer", INTERNAL_REVIEWER)
     review_timeout = config.defaults.external_review_timeout
 
     tasks = [
@@ -86,7 +113,7 @@ async def multi_model_review(
 
     reviews: list[tuple[str, ReviewVerdict]] = []
     for i, result in enumerate(results):
-        model_name = "claude" if i == 0 else external_reviewers[i - 1]
+        model_name = INTERNAL_REVIEWER if i == 0 else external_reviewers[i - 1]
         if isinstance(result, Exception):
             log.warning(f"Reviewer {model_name} failed: {result}")
             continue

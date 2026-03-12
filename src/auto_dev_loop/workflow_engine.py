@@ -195,7 +195,7 @@ async def execute_workflow(
         # Dispatch based on stage type
         if stage.type == "team":
             output = await dispatcher.dispatch_team(stage, issue, stage_outputs)
-        elif stage.reviewers:
+        elif stage.reviewers is not None:
             output = await dispatcher.dispatch_multi_review(stage, issue, stage_outputs)
         elif stage.type == "infrastructure":
             output = await dispatcher.dispatch_infrastructure(stage, issue, stage_outputs)
@@ -206,7 +206,7 @@ async def execute_workflow(
         # _build_prompt filters it out of agent prompts)
         stage_outputs[f"_{stage.ref}_last_output"] = output
 
-        is_review = bool(stage.reviewers) or stage.canVeto
+        is_review = (stage.reviewers is not None) or stage.canVeto
         verdict = _parse_verdict(output, strict=is_review)
 
         if verdict.status in ("approved", "completed"):

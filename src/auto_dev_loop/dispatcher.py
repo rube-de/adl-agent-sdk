@@ -134,6 +134,7 @@ class OrchestratorDispatcher(StageDispatcher):
             diff=diff,
             agents=self._agents,
             config=self._config,
+            reviewers_override=stage.reviewers,
         )
         if review.verdict.approved:
             return VERDICT_APPROVED

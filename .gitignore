@@ -50,3 +50,4 @@ logs/
 *.tmp
 .claude/files/
 docs/plans/
+docs/superpowers/plans/
