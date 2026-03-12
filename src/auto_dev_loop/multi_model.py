@@ -63,10 +63,26 @@ async def multi_model_review(
     diff: str,
     agents: dict[str, AgentDef],
     config: AppConfig,
+    reviewers_override: list[str] | None = None,
 ) -> MultiModelReviewResult:
-    """Run parallel multi-model review. Conservative: any rejection = reject."""
+    """Run parallel multi-model review. Conservative: any rejection = reject.
+
+    When *reviewers_override* is a non-empty list, it replaces the external
+    reviewers from ``config.defaults.external_reviewers``.  The ``claude``
+    entry (if present) is handled separately — it always uses ``agent_query``
+    against the bundled reviewer agent, not an external subprocess.
+    """
     review_prompt = build_review_prompt(plan, diff)
-    external_reviewers = config.defaults.external_reviewers
+
+    effective_reviewers = (
+        reviewers_override
+        if reviewers_override
+        else config.defaults.external_reviewers
+    )
+
+    # "claude" is the internal reviewer via agent_query — filter it out of
+    # external list since agent_query always runs as the first task.
+    external_reviewers = [r for r in effective_reviewers if r != "claude"]
     review_timeout = config.defaults.external_review_timeout
 
     tasks = [

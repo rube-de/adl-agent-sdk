@@ -130,3 +130,86 @@ async def test_all_reviewers_fail():
                     agents=_agents(),
                     config=_config(),
                 )
+
+
+@pytest.mark.asyncio
+async def test_stage_reviewers_override_config():
+    """When reviewers_override is provided, only those reviewers are used."""
+    called_external = []
+
+    async def mock_query(agent_def, prompt, worktree, config, **kw):
+        return VERDICT_APPROVED
+
+    async def mock_external(cmd, prompt, worktree, timeout):
+        called_external.append(cmd)
+        return VERDICT_APPROVED
+
+    with patch("auto_dev_loop.multi_model.agent_query", side_effect=mock_query):
+        with patch("auto_dev_loop.multi_model.run_external_with_timeout", side_effect=mock_external):
+            result = await multi_model_review(
+                worktree=Path("/tmp/wt"),
+                plan="plan",
+                diff="diff",
+                agents=_agents(),
+                config=_config(),
+                reviewers_override=["codex"],
+            )
+
+    assert result.verdict.approved is True
+    # Only "codex" should have been called, not "gemini" from config
+    assert called_external == ["codex"]
+
+
+@pytest.mark.asyncio
+async def test_stage_reviewers_override_empty_uses_config():
+    """When reviewers_override is empty, fall back to config.defaults.external_reviewers."""
+    called_external = []
+
+    async def mock_query(agent_def, prompt, worktree, config, **kw):
+        return VERDICT_APPROVED
+
+    async def mock_external(cmd, prompt, worktree, timeout):
+        called_external.append(cmd)
+        return VERDICT_APPROVED
+
+    with patch("auto_dev_loop.multi_model.agent_query", side_effect=mock_query):
+        with patch("auto_dev_loop.multi_model.run_external_with_timeout", side_effect=mock_external):
+            await multi_model_review(
+                worktree=Path("/tmp/wt"),
+                plan="plan",
+                diff="diff",
+                agents=_agents(),
+                config=_config(),
+                reviewers_override=[],
+            )
+
+    # Empty override -> fall back to config (which has ["gemini"])
+    assert called_external == ["gemini"]
+
+
+@pytest.mark.asyncio
+async def test_stage_reviewers_claude_filtered_from_external():
+    """'claude' in reviewers_override is filtered — it runs via agent_query, not subprocess."""
+    called_external = []
+
+    async def mock_query(agent_def, prompt, worktree, config, **kw):
+        return VERDICT_APPROVED
+
+    async def mock_external(cmd, prompt, worktree, timeout):
+        called_external.append(cmd)
+        return VERDICT_APPROVED
+
+    with patch("auto_dev_loop.multi_model.agent_query", side_effect=mock_query):
+        with patch("auto_dev_loop.multi_model.run_external_with_timeout", side_effect=mock_external):
+            result = await multi_model_review(
+                worktree=Path("/tmp/wt"),
+                plan="plan",
+                diff="diff",
+                agents=_agents(),
+                config=_config(),
+                reviewers_override=["claude", "codex"],
+            )
+
+    assert result.verdict.approved is True
+    # "claude" should NOT appear in external calls — it's the internal reviewer
+    assert called_external == ["codex"]
