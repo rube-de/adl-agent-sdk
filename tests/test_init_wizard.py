@@ -158,7 +158,7 @@ def test_run_init_wizard_hardcoded_token(tmp_path: Path, monkeypatch, capsys) ->
 # ---- Gap 2: validation failure ----
 
 
-def test_run_init_wizard_validation_failure(tmp_path: Path, monkeypatch) -> None:
+def test_run_init_wizard_validation_failure(tmp_path: Path, monkeypatch, capsys) -> None:
     config_path = tmp_path / "config.yaml"
 
     _patch_prompt_sequence(monkeypatch, ["token", 424242])
@@ -176,6 +176,9 @@ def test_run_init_wizard_validation_failure(tmp_path: Path, monkeypatch) -> None
 
     assert exc_info.value.exit_code == 1
     assert not config_path.exists()
+    captured = capsys.readouterr()
+    assert "Generated config failed validation" in captured.err
+    assert "boom" in captured.err
 
 
 # ---- Gap 3: custom model roles ----
@@ -195,9 +198,7 @@ def test_run_init_wizard_custom_model_roles(tmp_path: Path, monkeypatch) -> None
     run_init_wizard(config_path)
 
     cfg_yaml = yaml.safe_load(config_path.read_text())
-    assert cfg_yaml["model_roles"]["smol"] == "custom-smol"
-    assert cfg_yaml["model_roles"]["default"] == "custom-default"
-    assert cfg_yaml["model_roles"]["slow"] == "custom-slow"
+    assert cfg_yaml["model_roles"] == {"smol": "custom-smol", "default": "custom-default", "slow": "custom-slow"}
 
 
 # ---- Gap 4: custom daemon defaults ----
@@ -214,11 +215,7 @@ def test_run_init_wizard_custom_daemon_defaults(tmp_path: Path, monkeypatch) -> 
     run_init_wizard(config_path)
 
     cfg_yaml = yaml.safe_load(config_path.read_text())
-    assert cfg_yaml["defaults"]["poll_interval"] == 99
-    assert cfg_yaml["defaults"]["max_concurrent"] == 8
-    assert cfg_yaml["defaults"]["max_plan_iterations"] == 15
-    assert cfg_yaml["defaults"]["max_dev_cycles"] == 20
-    assert cfg_yaml["defaults"]["max_review_cycles"] == 7
+    assert cfg_yaml["defaults"] == {"poll_interval": 99, "max_concurrent": 8, "max_plan_iterations": 15, "max_dev_cycles": 20, "max_review_cycles": 7}
 
 
 # ---- Gap 5: overwrite-accept ----
@@ -245,11 +242,7 @@ def test_run_init_wizard_overwrite_accept(tmp_path: Path, monkeypatch) -> None:
 def test_prompt_required_retries_on_empty(monkeypatch) -> None:
     from auto_dev_loop.init_wizard import _prompt_required
 
-    calls = iter(["", "   ", "valid-value"])
-    monkeypatch.setattr(
-        "auto_dev_loop.init_wizard.typer.prompt",
-        lambda *a, **kw: next(calls),
-    )
+    _patch_prompt_sequence(monkeypatch, ["", "   ", "valid-value"])
 
     result = _prompt_required("test label")
     assert result == "valid-value"
