@@ -13,6 +13,9 @@ from .review_parser import parse_review_verdict, synthesize_reviews
 
 log = logging.getLogger(__name__)
 
+# Marker for the bundled internal reviewer (runs via agent_query, not subprocess).
+INTERNAL_REVIEWER = "claude"
+
 
 class AllReviewersFailedError(Exception):
     pass
@@ -82,7 +85,7 @@ async def multi_model_review(
 
     # "claude" is the internal reviewer via agent_query — filter it out of
     # external list since agent_query always runs as the first task.
-    external_reviewers = [r for r in effective_reviewers if r != "claude"]
+    external_reviewers = [r for r in effective_reviewers if r != INTERNAL_REVIEWER]
     review_timeout = config.defaults.external_review_timeout
 
     tasks = [
@@ -102,7 +105,7 @@ async def multi_model_review(
 
     reviews: list[tuple[str, ReviewVerdict]] = []
     for i, result in enumerate(results):
-        model_name = "claude" if i == 0 else external_reviewers[i - 1]
+        model_name = INTERNAL_REVIEWER if i == 0 else external_reviewers[i - 1]
         if isinstance(result, Exception):
             log.warning(f"Reviewer {model_name} failed: {result}")
             continue
