@@ -184,7 +184,7 @@ def test_stage_defaults():
     assert stage.optional is False
     assert stage.maxIterations == 3
     assert stage.canVeto is False
-    assert stage.reviewers == []
+    assert stage.reviewers is None
     assert stage.team == {}
 
 

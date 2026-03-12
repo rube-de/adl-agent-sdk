@@ -31,7 +31,7 @@ class StageConfig:
     loopTarget: str | None = None
     maxIterations: int = 3
     canVeto: bool = False
-    reviewers: list[str] = field(default_factory=list)
+    reviewers: list[str] | None = None
     team: dict[str, TeamMemberConfig] = field(default_factory=dict)
 
 
@@ -42,10 +42,10 @@ class WorkflowConfig:
     stages: list[StageConfig]
 
 
-def _parse_reviewers(raw: object, stage_ref: str) -> list[str]:
+def _parse_reviewers(raw: object, stage_ref: str) -> list[str] | None:
     """Normalize and validate the ``reviewers`` field from YAML."""
     if raw is None:
-        return []
+        return None
     if isinstance(raw, str):
         return [raw]
     if not isinstance(raw, list):
@@ -82,7 +82,7 @@ def load_workflow(path: Path) -> WorkflowConfig:
             loopTarget=s.get("loopTarget"),
             maxIterations=s.get("maxIterations", 3),
             canVeto=s.get("canVeto", False),
-            reviewers=_parse_reviewers(s.get("reviewers", []), s["ref"]),
+            reviewers=_parse_reviewers(s.get("reviewers"), s["ref"]),
             team=team,
         ))
 
