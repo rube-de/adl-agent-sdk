@@ -12,9 +12,12 @@ from auto_dev_loop.models import (
     ReviewIteration,
     ReviewVerdict,
     StageState,
+    StageStatus,
     TelegramConfig,
+    VerdictStatus,
     WorkflowResult,
     WorkflowSelectionConfig,
+    WorkflowStatus,
     VERDICT_APPROVED,
 )
 
@@ -57,13 +60,13 @@ def test_dev_result():
 
 
 def test_stage_state_defaults():
-    s = StageState(status="running")
+    s = StageState(status=StageStatus.RUNNING)
     assert s.elapsed is None
     assert s.iteration == 1
 
 
 def test_workflow_result():
-    r = WorkflowResult(status="completed")
+    r = WorkflowResult(status=WorkflowStatus.COMPLETED)
     assert r.stage is None
 
 
@@ -119,3 +122,19 @@ def test_resolved_repo_config():
     assert resolved.defaults.poll_interval == 60
     assert resolved.model_roles["default"] == "sonnet"
     assert resolved.version == 3
+
+
+def test_verdict_status_str_equality():
+    """StrEnum values compare equal to their string counterparts."""
+    assert VerdictStatus.APPROVED == "approved"
+    assert VerdictStatus.NEEDS_REVISION == "needs_revision"
+
+
+def test_workflow_status_str_equality():
+    assert WorkflowStatus.COMPLETED == "completed"
+    assert WorkflowStatus.VETOED == "vetoed"
+
+
+def test_stage_status_str_equality():
+    assert StageStatus.PENDING == "pending"
+    assert StageStatus.RUNNING == "running"

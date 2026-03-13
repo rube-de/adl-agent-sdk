@@ -12,7 +12,7 @@ from auto_dev_loop.orchestrator import (
     ProcessResult,
     build_pr_command,
 )
-from auto_dev_loop.models import Issue, Config, TelegramConfig, Defaults, WorkflowSelectionConfig
+from auto_dev_loop.models import Issue, Config, TelegramConfig, Defaults, WorkflowSelectionConfig, WorkflowResult, WorkflowStatus
 
 
 def _issue():
@@ -35,8 +35,6 @@ def _config():
 @pytest.mark.asyncio
 async def test_process_issue_uses_workflow_engine():
     """process_issue should load workflow, create dispatcher, and call execute_workflow."""
-    from auto_dev_loop.models import WorkflowResult
-
     with patch("auto_dev_loop.orchestrator.create_worktree"):
         with patch("auto_dev_loop.orchestrator.delete_worktree"):
             with patch("auto_dev_loop.orchestrator.select_workflow", return_value="bug_fix"):
@@ -45,7 +43,7 @@ async def test_process_issue_uses_workflow_engine():
                     mock_load_wf.return_value = {"bug_fix": mock_wf}
                     with patch("auto_dev_loop.orchestrator.load_agents", return_value={}):
                         with patch("auto_dev_loop.orchestrator.execute_workflow") as mock_exec:
-                            mock_exec.return_value = WorkflowResult(status="completed")
+                            mock_exec.return_value = WorkflowResult(status=WorkflowStatus.COMPLETED)
                             with patch("auto_dev_loop.orchestrator.OrchestratorDispatcher") as mock_disp_cls:
                                 mock_disp = MagicMock()
                                 mock_disp.pr_number = 99
@@ -61,8 +59,6 @@ async def test_process_issue_uses_workflow_engine():
 
 @pytest.mark.asyncio
 async def test_process_issue_escalated():
-    from auto_dev_loop.models import WorkflowResult
-
     with patch("auto_dev_loop.orchestrator.create_worktree"):
         with patch("auto_dev_loop.orchestrator.delete_worktree"):
             with patch("auto_dev_loop.orchestrator.select_workflow", return_value="feature"):
@@ -70,7 +66,7 @@ async def test_process_issue_escalated():
                     mock_load_wf.return_value = {"feature": MagicMock()}
                     with patch("auto_dev_loop.orchestrator.load_agents", return_value={}):
                         with patch("auto_dev_loop.orchestrator.execute_workflow") as mock_exec:
-                            mock_exec.return_value = WorkflowResult(status="escalated", stage="review")
+                            mock_exec.return_value = WorkflowResult(status=WorkflowStatus.ESCALATED, stage="review")
                             with patch("auto_dev_loop.orchestrator.OrchestratorDispatcher") as mock_disp_cls:
                                 mock_disp_cls.return_value = MagicMock(pr_number=None)
                                 result = await process_issue(

@@ -2,7 +2,7 @@
 
 import pytest
 
-from auto_dev_loop.models import VERDICT_APPROVED
+from auto_dev_loop.models import VERDICT_APPROVED, StageStatus
 from auto_dev_loop.state import StateStore
 
 
@@ -80,10 +80,11 @@ async def test_store_workflow_stage(db: StateStore):
     await db.store_workflow_stage(
         issue_id=issue["id"], workflow_id="bug_fix",
         stage_ref="plan", stage_index=0, iteration=1,
-        status="approved", verdict="approved",
+        status=StageStatus.APPROVED, verdict="approved",
     )
     stages = await db.get_workflow_stages(issue["id"])
     assert len(stages) == 1
+    assert stages[0]["status"] == "approved"
     assert stages[0]["stage_ref"] == "plan"
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 
 # Verdict markers emitted by agents and parsed by the workflow engine.
 # Keep in sync: dispatcher produces these, workflow_engine/review_parser consume them.
@@ -30,6 +31,30 @@ APPROVED_MARKERS = frozenset({
     VERDICT_FIXES_APPLIED,
     VERDICT_FEEDBACK_APPLIED,
 })
+
+
+class VerdictStatus(StrEnum):
+    APPROVED = "approved"
+    NEEDS_REVISION = "needs_revision"
+    VETOED = "vetoed"
+    BLOCKED = "blocked"
+    CLARIFICATION_NEEDED = "clarification_needed"
+    MAX_ITERATIONS = "max_iterations"
+
+
+class WorkflowStatus(StrEnum):
+    COMPLETED = "completed"
+    VETOED = "vetoed"
+    ESCALATED = "escalated"
+
+
+class StageStatus(StrEnum):
+    PENDING = "pending"
+    RUNNING = "running"
+    APPROVED = "approved"
+    COMPLETED = "completed"
+    VETOED = "vetoed"
+    ESCALATED = "escalated"
 
 
 def has_verdict_line(output: str, marker: str) -> bool:
@@ -101,7 +126,7 @@ class DevResult:
 
 @dataclass
 class StageState:
-    status: str  # "pending", "running", "approved", "completed", "vetoed", "escalated"
+    status: StageStatus
     elapsed: str | None = None
     iteration: int = 1
     started_at: float | None = None
@@ -109,7 +134,7 @@ class StageState:
 
 @dataclass
 class WorkflowResult:
-    status: str  # "completed", "vetoed", "escalated"
+    status: WorkflowStatus
     stage: str | None = None
 
 
