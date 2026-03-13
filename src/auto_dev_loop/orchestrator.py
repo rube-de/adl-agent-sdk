@@ -12,7 +12,7 @@ from .agent_loader import load_agents
 from .branch import build_branch_name
 from .dispatcher import OrchestratorDispatcher
 from .hooks import CommandGuard, LoggingSecurityHandler, create_default_guard
-from .models import AppConfig, Issue
+from .models import AppConfig, Issue, WorkflowStatus
 from .pr import build_pr_command, create_pr  # noqa: F401 — re-exported for tests
 from .workflow_engine import execute_workflow
 from .workflow_loader import load_all_workflows
@@ -46,9 +46,9 @@ class ProcessResult:
 
 
 _RESULT_STATE_MAP = {
-    "completed": IssueState.COMPLETED,
-    "escalated": IssueState.ESCALATED,
-    "vetoed": IssueState.ESCALATED,
+    WorkflowStatus.COMPLETED: IssueState.COMPLETED,
+    WorkflowStatus.ESCALATED: IssueState.ESCALATED,
+    WorkflowStatus.VETOED: IssueState.ESCALATED,
 }
 
 
@@ -144,7 +144,7 @@ async def process_issue(
         return ProcessResult(
             state=final_state,
             pr_number=dispatcher.pr_number,
-            error=f"Workflow {result.status} at stage {result.stage}" if result.status != "completed" else None,
+            error=f"Workflow {result.status} at stage {result.stage}" if result.status != WorkflowStatus.COMPLETED else None,
         )
 
     except Exception as e:
