@@ -228,6 +228,25 @@ async def execute_workflow(
                 continue
             return WorkflowResult(status=WorkflowStatus.VETOED, stage=stage.ref)
 
+        if verdict.status in (VerdictStatus.BLOCKED, VerdictStatus.CLARIFICATION_NEEDED, VerdictStatus.MAX_ITERATIONS):
+            # "agent_max_iterations" (not "iteration_cap") distinguishes
+            # agent-reported limit from engine-enforced maxIterations exhaustion.
+            reason = (
+                "agent_max_iterations"
+                if verdict.status == VerdictStatus.MAX_ITERATIONS
+                else verdict.status.value
+            )
+            human_result = await dispatcher.escalate_to_human(
+                issue, stage,
+                ReviewVerdict(approved=False, feedback=verdict.feedback),
+                reason,
+            )
+            if human_result == "approve":
+                stage_outputs[stage.ref] = output
+                stage_idx += 1
+                continue
+            return WorkflowResult(status=WorkflowStatus.ESCALATED, stage=stage.ref)
+
         if stage.loopTarget:
             # Jump back to the target stage; track feedback for context
             target_idx = _find_stage_index(workflow, stage.loopTarget)
