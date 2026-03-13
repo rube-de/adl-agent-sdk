@@ -7,7 +7,7 @@ from auto_dev_loop.telegram.messages import (
     build_error_message,
     build_security_message,
 )
-from auto_dev_loop.models import Issue, StageState
+from auto_dev_loop.models import Issue, StageState, StageStatus
 from auto_dev_loop.workflow_loader import WorkflowConfig, StageConfig
 
 
@@ -24,7 +24,7 @@ def _workflow():
 
 
 def test_progress_message_running():
-    states = {"plan": StageState(status="approved", elapsed="12s")}
+    states = {"plan": StageState(status=StageStatus.APPROVED, elapsed="12s")}
     text = build_progress_message(_issue(), _workflow(), states, "12s")
     assert "owner/repo #42" in text
     assert "bug_fix" in text

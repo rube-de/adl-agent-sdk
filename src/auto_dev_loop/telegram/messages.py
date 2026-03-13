@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import html
 
-from ..models import Issue, StageState
+from ..models import Issue, StageState, StageStatus
 from ..workflow_loader import WorkflowConfig, StageConfig
 from .callbacks import encode_callback
 from .models import InlineKeyboardButton, InlineKeyboardMarkup
@@ -23,14 +23,14 @@ def build_progress_message(
 
     for stage in workflow.stages:
         state = stage_states.get(stage.ref)
-        if state and state.status in ("approved", "completed"):
+        if state and state.status in (StageStatus.APPROVED, StageStatus.COMPLETED):
             lines.append(f"  ✅ <code>{stage.ref:<16}</code> ({state.elapsed})")
-        elif state and state.status == "running":
+        elif state and state.status == StageStatus.RUNNING:
             detail = ""
             if stage.type == "team":
                 detail = f"cycle {state.iteration}/{stage.maxIterations} "
             lines.append(f"  ⏳ <code>{stage.ref:<16}</code> {detail}({state.elapsed})")
-        elif state and state.status in ("vetoed", "escalated"):
+        elif state and state.status in (StageStatus.VETOED, StageStatus.ESCALATED):
             lines.append(f"  🔴 <code>{stage.ref:<16}</code> ({state.elapsed})")
         elif stage.optional:
             lines.append(f"  ⬜ <code>{stage.ref:<16}</code> (optional)")
