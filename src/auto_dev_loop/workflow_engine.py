@@ -8,6 +8,7 @@ engine testable without SDK dependencies.
 from __future__ import annotations
 
 import logging
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
@@ -29,6 +30,19 @@ from .workflow_conditions import CONDITIONS  # noqa: F401 — re-exported as pub
 from .workflow_loader import StageConfig, WorkflowConfig
 
 log = logging.getLogger(__name__)
+
+_VERDICT_MARKER_RE = re.compile(r"^\s*<<<VERDICT:[A-Z_]+>>>\s*$", re.MULTILINE)
+
+_ESCALATION_REASONS: dict[VerdictStatus, str] = {
+    VerdictStatus.BLOCKED: "blocked",
+    VerdictStatus.CLARIFICATION_NEEDED: "clarification_needed",
+    VerdictStatus.MAX_ITERATIONS: "agent_max_iterations",
+}
+
+
+def _strip_verdict_markers(output: str) -> str:
+    """Remove verdict marker lines from agent output for clean storage."""
+    return _VERDICT_MARKER_RE.sub("", output).strip()
 
 
 class StageDispatcher(ABC):
@@ -223,26 +237,20 @@ async def execute_workflow(
                 "security_veto",
             )
             if human_result == "approve":
-                stage_outputs[stage.ref] = output
+                stage_outputs[stage.ref] = _strip_verdict_markers(output)
                 stage_idx += 1
                 continue
             return WorkflowResult(status=WorkflowStatus.VETOED, stage=stage.ref)
 
         if verdict.status in (VerdictStatus.BLOCKED, VerdictStatus.CLARIFICATION_NEEDED, VerdictStatus.MAX_ITERATIONS):
-            # "agent_max_iterations" (not "iteration_cap") distinguishes
-            # agent-reported limit from engine-enforced maxIterations exhaustion.
-            reason = (
-                "agent_max_iterations"
-                if verdict.status == VerdictStatus.MAX_ITERATIONS
-                else verdict.status.value
-            )
+            reason = _ESCALATION_REASONS[verdict.status]
             human_result = await dispatcher.escalate_to_human(
                 issue, stage,
                 ReviewVerdict(approved=False, feedback=verdict.feedback),
                 reason,
             )
             if human_result == "approve":
-                stage_outputs[stage.ref] = output
+                stage_outputs[stage.ref] = _strip_verdict_markers(output)
                 stage_idx += 1
                 continue
             return WorkflowResult(status=WorkflowStatus.ESCALATED, stage=stage.ref)

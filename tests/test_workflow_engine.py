@@ -535,3 +535,51 @@ async def test_max_iterations_verdict_human_approves():
     )
     result = await execute_workflow(wf, _issue(), MaxIterApproveDispatcher({}))
     assert result.status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_blocked_verdict_no_loop_target_escalates():
+    """BLOCKED on a stage without loopTarget should escalate, not loop indefinitely."""
+    escalation_reasons = []
+
+    class BlockedDispatcher(FakeDispatcher):
+        async def dispatch_single(self, stage, issue, prior_outputs):
+            if stage.ref == "dev":
+                return VERDICT_BLOCKED
+            return VERDICT_APPROVED
+
+        async def escalate_to_human(self, issue, stage, verdict, reason):
+            escalation_reasons.append(reason)
+            return "reject"
+
+    wf = _workflow(StageConfig(ref="dev", agent="developer"))
+    result = await execute_workflow(wf, _issue(), BlockedDispatcher({}))
+    assert result.status == "escalated"
+    assert result.stage == "dev"
+    assert escalation_reasons == ["blocked"]
+
+
+@pytest.mark.asyncio
+async def test_approved_escalation_strips_verdict_markers():
+    """Approved BLOCKED output stored in stage_outputs should not contain verdict markers."""
+    stored_outputs = {}
+
+    class CapturingDispatcher(FakeDispatcher):
+        async def dispatch_single(self, stage, issue, prior_outputs):
+            stored_outputs.update(prior_outputs)
+            if stage.ref == "dev":
+                return f"I'm blocked on credentials\n\n{VERDICT_BLOCKED}"
+            return VERDICT_APPROVED
+
+        async def escalate_to_human(self, issue, stage, verdict, reason):
+            return "approve"
+
+    wf = _workflow(
+        StageConfig(ref="dev", agent="developer"),
+        StageConfig(ref="review", agent="reviewer"),
+    )
+    result = await execute_workflow(wf, _issue(), CapturingDispatcher({}))
+    assert result.status == "completed"
+    # The review stage should see dev output without the verdict marker
+    assert "<<<VERDICT:BLOCKED>>>" not in stored_outputs.get("dev", "")
+    assert "I'm blocked on credentials" in stored_outputs.get("dev", "")
