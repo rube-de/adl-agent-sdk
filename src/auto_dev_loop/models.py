@@ -35,7 +35,6 @@ APPROVED_MARKERS = frozenset({
 
 class VerdictStatus(StrEnum):
     APPROVED = "approved"
-    COMPLETED = "completed"
     NEEDS_REVISION = "needs_revision"
     VETOED = "vetoed"
     BLOCKED = "blocked"

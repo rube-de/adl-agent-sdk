@@ -84,6 +84,7 @@ async def test_store_workflow_stage(db: StateStore):
     )
     stages = await db.get_workflow_stages(issue["id"])
     assert len(stages) == 1
+    assert stages[0]["status"] == "approved"
     assert stages[0]["stage_ref"] == "plan"
 
 

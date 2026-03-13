@@ -24,11 +24,12 @@ def _workflow():
 
 
 def test_progress_message_running():
-    states = {"plan": StageState(status=StageStatus.APPROVED, elapsed="12s")}
+    states = {"plan": StageState(status=StageStatus.RUNNING, elapsed="12s")}
     text = build_progress_message(_issue(), _workflow(), states, "12s")
     assert "owner/repo #42" in text
     assert "bug_fix" in text
     assert "plan" in text
+    assert "⏳" in text
 
 
 def test_progress_message_all_pending():

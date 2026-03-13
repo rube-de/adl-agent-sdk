@@ -211,7 +211,7 @@ async def execute_workflow(
         is_review = (stage.reviewers is not None) or stage.canVeto
         verdict = _parse_verdict(output, strict=is_review)
 
-        if verdict.status in (VerdictStatus.APPROVED, VerdictStatus.COMPLETED):
+        if verdict.status == VerdictStatus.APPROVED:
             stage_outputs[stage.ref] = output
             stage_idx += 1
             continue
