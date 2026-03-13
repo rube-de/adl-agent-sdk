@@ -20,7 +20,9 @@ from .models import (
     VERDICT_VETOED,
     Issue,
     ReviewVerdict,
+    VerdictStatus,
     WorkflowResult,
+    WorkflowStatus,
 )
 from .review_parser import parse_review_verdict
 from .workflow_conditions import CONDITIONS  # noqa: F401 — re-exported as public API
@@ -89,7 +91,7 @@ def evaluate_condition(condition: str, issue: Issue) -> bool:
 
 @dataclass
 class Verdict:
-    status: str  # "approved", "completed", "needs_revision", "vetoed", "blocked", "clarification_needed", "max_iterations"
+    status: VerdictStatus
     feedback: str | None = None
 
 
@@ -104,22 +106,22 @@ def _parse_verdict(output: str, *, strict: bool = False) -> Verdict:
 
     for line in reversed(lines):
         if line in APPROVED_MARKERS:
-            return Verdict(status="approved")
+            return Verdict(status=VerdictStatus.APPROVED)
         if line == VERDICT_NEEDS_REVISION:
             rv = parse_review_verdict(output)
-            return Verdict(status="needs_revision", feedback=rv.feedback)
+            return Verdict(status=VerdictStatus.NEEDS_REVISION, feedback=rv.feedback)
         if line == VERDICT_VETOED:
-            return Verdict(status="vetoed", feedback=output)
+            return Verdict(status=VerdictStatus.VETOED, feedback=output)
         if line == VERDICT_BLOCKED:
-            return Verdict(status="blocked", feedback=output)
+            return Verdict(status=VerdictStatus.BLOCKED, feedback=output)
         if line == VERDICT_CLARIFICATION_NEEDED:
-            return Verdict(status="clarification_needed", feedback=output)
+            return Verdict(status=VerdictStatus.CLARIFICATION_NEEDED, feedback=output)
         if line == VERDICT_MAX_ITERATIONS:
-            return Verdict(status="max_iterations", feedback=output)
+            return Verdict(status=VerdictStatus.MAX_ITERATIONS, feedback=output)
 
     if strict:
-        return Verdict(status="needs_revision", feedback="No verdict marker found in output")
-    return Verdict(status="approved")
+        return Verdict(status=VerdictStatus.NEEDS_REVISION, feedback="No verdict marker found in output")
+    return Verdict(status=VerdictStatus.APPROVED)
 
 
 def _find_stage_index(workflow: WorkflowConfig, ref: str) -> int:
@@ -182,7 +184,7 @@ async def execute_workflow(
                 stage_outputs[stage.ref] = last_output
                 stage_idx += 1
             else:
-                return WorkflowResult(status="escalated", stage=stage.ref)
+                return WorkflowResult(status=WorkflowStatus.ESCALATED, stage=stage.ref)
             continue
 
         if not is_loopback_reentry:
@@ -209,12 +211,12 @@ async def execute_workflow(
         is_review = (stage.reviewers is not None) or stage.canVeto
         verdict = _parse_verdict(output, strict=is_review)
 
-        if verdict.status in ("approved", "completed"):
+        if verdict.status in (VerdictStatus.APPROVED, VerdictStatus.COMPLETED):
             stage_outputs[stage.ref] = output
             stage_idx += 1
             continue
 
-        if verdict.status == "vetoed" and stage.canVeto:
+        if verdict.status == VerdictStatus.VETOED and stage.canVeto:
             human_result = await dispatcher.escalate_to_human(
                 issue, stage,
                 ReviewVerdict(approved=False, feedback=verdict.feedback),
@@ -224,7 +226,7 @@ async def execute_workflow(
                 stage_outputs[stage.ref] = output
                 stage_idx += 1
                 continue
-            return WorkflowResult(status="vetoed", stage=stage.ref)
+            return WorkflowResult(status=WorkflowStatus.VETOED, stage=stage.ref)
 
         if stage.loopTarget:
             # Jump back to the target stage; track feedback for context
@@ -239,4 +241,4 @@ async def execute_workflow(
         stage_outputs[f"{stage.ref}_feedback_{iteration}"] = verdict.feedback or ""
         # stage_idx stays the same; next iteration of the while loop re-runs this stage
 
-    return WorkflowResult(status="completed")
+    return WorkflowResult(status=WorkflowStatus.COMPLETED)
