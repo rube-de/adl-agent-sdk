@@ -583,3 +583,28 @@ async def test_approved_escalation_strips_verdict_markers():
     # The review stage should see dev output without the verdict marker
     assert "<<<VERDICT:BLOCKED>>>" not in stored_outputs.get("dev", "")
     assert "I'm blocked on credentials" in stored_outputs.get("dev", "")
+
+
+@pytest.mark.asyncio
+async def test_vetoed_verdict_human_approves_strips_marker():
+    """Approved VETOED output stored in stage_outputs should not contain verdict markers."""
+    stored_outputs = {}
+
+    class VetoApproveCapturing(FakeDispatcher):
+        async def dispatch_single(self, stage, issue, prior_outputs):
+            stored_outputs.update(prior_outputs)
+            if stage.ref == "security":
+                return f"Deployment blocked by policy\n\n{VERDICT_VETOED}"
+            return VERDICT_APPROVED
+
+        async def escalate_to_human(self, issue, stage, verdict, reason):
+            return "approve"
+
+    wf = _workflow(
+        StageConfig(ref="security", agent="sec_reviewer", canVeto=True),
+        StageConfig(ref="deploy", agent="deployer"),
+    )
+    result = await execute_workflow(wf, _issue(), VetoApproveCapturing({}))
+    assert result.status == "completed"
+    assert "<<<VERDICT:VETOED>>>" not in stored_outputs.get("security", "")
+    assert "Deployment blocked by policy" in stored_outputs.get("security", "")

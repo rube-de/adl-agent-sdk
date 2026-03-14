@@ -42,7 +42,9 @@ _ESCALATION_REASONS: dict[VerdictStatus, str] = {
 
 def _strip_verdict_markers(output: str) -> str:
     """Remove verdict marker lines from agent output for clean storage."""
-    return _VERDICT_MARKER_RE.sub("", output).strip()
+    stripped = _VERDICT_MARKER_RE.sub("", output)
+    stripped = re.sub(r"\n{3,}", "\n\n", stripped)
+    return stripped.strip()
 
 
 class StageDispatcher(ABC):
@@ -195,7 +197,7 @@ async def execute_workflow(
                 "iteration_cap",
             )
             if human_result == "approve":
-                stage_outputs[stage.ref] = last_output
+                stage_outputs[stage.ref] = _strip_verdict_markers(last_output)
                 stage_idx += 1
             else:
                 return WorkflowResult(status=WorkflowStatus.ESCALATED, stage=stage.ref)
