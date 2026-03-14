@@ -13,6 +13,7 @@ from auto_dev_loop.models import (
     VERDICT_APPROVED, VERDICT_NEEDS_REVISION, VERDICT_VETOED, VERDICT_TESTS_PASSING,
     VERDICT_PLAN_READY, VERDICT_IMPLEMENTATION_COMPLETE, VERDICT_FIXES_APPLIED,
     VERDICT_FEEDBACK_APPLIED, APPROVED_MARKERS,
+    VERDICT_BLOCKED, VERDICT_CLARIFICATION_NEEDED, VERDICT_MAX_ITERATIONS,
 )
 from auto_dev_loop.workflow_loader import WorkflowConfig, StageConfig
 
@@ -390,3 +391,220 @@ def test_parse_verdict_rejects_bare_needs_revision_in_untrusted_data():
     output = f"The old code checked for NEEDS_REVISION\n\n{VERDICT_APPROVED}"
     verdict = _parse_verdict(output)
     assert verdict.status == "approved"
+
+
+# --- Explicit verdict handling tests ---
+
+@pytest.mark.asyncio
+async def test_blocked_verdict_escalates():
+    """BLOCKED verdict should trigger human escalation, not fall through to loopTarget."""
+    escalation_reasons = []
+
+    class BlockedDispatcher(FakeDispatcher):
+        async def dispatch_single(self, stage, issue, prior_outputs):
+            if stage.ref == "dev":
+                return VERDICT_BLOCKED
+            return VERDICT_APPROVED
+
+        async def escalate_to_human(self, issue, stage, verdict, reason):
+            escalation_reasons.append(reason)
+            return "reject"
+
+    wf = _workflow(
+        StageConfig(ref="plan", agent="architect"),
+        StageConfig(ref="dev", agent="developer", loopTarget="plan", maxIterations=3),
+    )
+    result = await execute_workflow(wf, _issue(), BlockedDispatcher({}))
+    assert result.status == "escalated"
+    assert result.stage == "dev"
+    assert escalation_reasons == ["blocked"]
+
+
+@pytest.mark.asyncio
+async def test_blocked_verdict_human_approves():
+    """BLOCKED verdict with human approval should continue the workflow."""
+
+    class BlockedApproveDispatcher(FakeDispatcher):
+        async def dispatch_single(self, stage, issue, prior_outputs):
+            if stage.ref == "dev":
+                return VERDICT_BLOCKED
+            return VERDICT_APPROVED
+
+        async def escalate_to_human(self, issue, stage, verdict, reason):
+            return "approve"
+
+    wf = _workflow(
+        StageConfig(ref="plan", agent="architect"),
+        StageConfig(ref="dev", agent="developer", loopTarget="plan", maxIterations=3),
+    )
+    result = await execute_workflow(wf, _issue(), BlockedApproveDispatcher({}))
+    assert result.status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_clarification_needed_verdict_escalates():
+    """CLARIFICATION_NEEDED verdict should trigger human escalation."""
+    escalation_reasons = []
+
+    class ClarificationDispatcher(FakeDispatcher):
+        async def dispatch_single(self, stage, issue, prior_outputs):
+            if stage.ref == "dev":
+                return VERDICT_CLARIFICATION_NEEDED
+            return VERDICT_APPROVED
+
+        async def escalate_to_human(self, issue, stage, verdict, reason):
+            escalation_reasons.append(reason)
+            return "reject"
+
+    wf = _workflow(
+        StageConfig(ref="plan", agent="architect"),
+        StageConfig(ref="dev", agent="developer", loopTarget="plan", maxIterations=3),
+    )
+    result = await execute_workflow(wf, _issue(), ClarificationDispatcher({}))
+    assert result.status == "escalated"
+    assert result.stage == "dev"
+    assert escalation_reasons == ["clarification_needed"]
+
+
+@pytest.mark.asyncio
+async def test_clarification_needed_verdict_human_approves():
+    """CLARIFICATION_NEEDED verdict with human approval should continue."""
+
+    class ClarificationApproveDispatcher(FakeDispatcher):
+        async def dispatch_single(self, stage, issue, prior_outputs):
+            if stage.ref == "dev":
+                return VERDICT_CLARIFICATION_NEEDED
+            return VERDICT_APPROVED
+
+        async def escalate_to_human(self, issue, stage, verdict, reason):
+            return "approve"
+
+    wf = _workflow(
+        StageConfig(ref="plan", agent="architect"),
+        StageConfig(ref="dev", agent="developer", loopTarget="plan", maxIterations=3),
+    )
+    result = await execute_workflow(wf, _issue(), ClarificationApproveDispatcher({}))
+    assert result.status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_max_iterations_verdict_escalates_immediately():
+    """MAX_ITERATIONS verdict should bypass loopTarget and escalate immediately."""
+    call_count = {"plan": 0, "dev": 0}
+    escalation_reasons = []
+
+    class MaxIterDispatcher(FakeDispatcher):
+        async def dispatch_single(self, stage, issue, prior_outputs):
+            call_count[stage.ref] = call_count.get(stage.ref, 0) + 1
+            if stage.ref == "dev":
+                return VERDICT_MAX_ITERATIONS
+            return VERDICT_APPROVED
+
+        async def escalate_to_human(self, issue, stage, verdict, reason):
+            escalation_reasons.append(reason)
+            return "reject"
+
+    wf = _workflow(
+        StageConfig(ref="plan", agent="architect"),
+        StageConfig(ref="dev", agent="developer", loopTarget="plan", maxIterations=3),
+    )
+    result = await execute_workflow(wf, _issue(), MaxIterDispatcher({}))
+    assert result.status == "escalated"
+    assert result.stage == "dev"
+    assert escalation_reasons == ["agent_max_iterations"]
+    # plan should only be called ONCE — no loopTarget jump-back
+    assert call_count["plan"] == 1
+
+
+@pytest.mark.asyncio
+async def test_max_iterations_verdict_human_approves():
+    """MAX_ITERATIONS verdict with human approval should continue."""
+
+    class MaxIterApproveDispatcher(FakeDispatcher):
+        async def dispatch_single(self, stage, issue, prior_outputs):
+            if stage.ref == "dev":
+                return VERDICT_MAX_ITERATIONS
+            return VERDICT_APPROVED
+
+        async def escalate_to_human(self, issue, stage, verdict, reason):
+            return "approve"
+
+    wf = _workflow(
+        StageConfig(ref="plan", agent="architect"),
+        StageConfig(ref="dev", agent="developer", loopTarget="plan", maxIterations=3),
+    )
+    result = await execute_workflow(wf, _issue(), MaxIterApproveDispatcher({}))
+    assert result.status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_blocked_verdict_no_loop_target_escalates():
+    """BLOCKED on a stage without loopTarget should escalate, not loop indefinitely."""
+    escalation_reasons = []
+
+    class BlockedDispatcher(FakeDispatcher):
+        async def dispatch_single(self, stage, issue, prior_outputs):
+            if stage.ref == "dev":
+                return VERDICT_BLOCKED
+            return VERDICT_APPROVED
+
+        async def escalate_to_human(self, issue, stage, verdict, reason):
+            escalation_reasons.append(reason)
+            return "reject"
+
+    wf = _workflow(StageConfig(ref="dev", agent="developer"))
+    result = await execute_workflow(wf, _issue(), BlockedDispatcher({}))
+    assert result.status == "escalated"
+    assert result.stage == "dev"
+    assert escalation_reasons == ["blocked"]
+
+
+@pytest.mark.asyncio
+async def test_approved_escalation_strips_verdict_markers():
+    """Approved BLOCKED output stored in stage_outputs should not contain verdict markers."""
+    stored_outputs = {}
+
+    class CapturingDispatcher(FakeDispatcher):
+        async def dispatch_single(self, stage, issue, prior_outputs):
+            stored_outputs.update(prior_outputs)
+            if stage.ref == "dev":
+                return f"I'm blocked on credentials\n\n{VERDICT_BLOCKED}"
+            return VERDICT_APPROVED
+
+        async def escalate_to_human(self, issue, stage, verdict, reason):
+            return "approve"
+
+    wf = _workflow(
+        StageConfig(ref="dev", agent="developer"),
+        StageConfig(ref="review", agent="reviewer"),
+    )
+    result = await execute_workflow(wf, _issue(), CapturingDispatcher({}))
+    assert result.status == "completed"
+    # The review stage should see dev output without the verdict marker
+    assert "<<<VERDICT:BLOCKED>>>" not in stored_outputs.get("dev", "")
+    assert "I'm blocked on credentials" in stored_outputs.get("dev", "")
+
+
+@pytest.mark.asyncio
+async def test_vetoed_verdict_human_approves_strips_marker():
+    """Approved VETOED output stored in stage_outputs should not contain verdict markers."""
+    stored_outputs = {}
+
+    class VetoApproveCapturing(FakeDispatcher):
+        async def dispatch_single(self, stage, issue, prior_outputs):
+            stored_outputs.update(prior_outputs)
+            if stage.ref == "security":
+                return f"Deployment blocked by policy\n\n{VERDICT_VETOED}"
+            return VERDICT_APPROVED
+
+        async def escalate_to_human(self, issue, stage, verdict, reason):
+            return "approve"
+
+    wf = _workflow(
+        StageConfig(ref="security", agent="sec_reviewer", canVeto=True),
+        StageConfig(ref="deploy", agent="deployer"),
+    )
+    result = await execute_workflow(wf, _issue(), VetoApproveCapturing({}))
+    assert result.status == "completed"
+    assert "<<<VERDICT:VETOED>>>" not in stored_outputs.get("security", "")
+    assert "Deployment blocked by policy" in stored_outputs.get("security", "")
