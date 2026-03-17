@@ -20,7 +20,7 @@ class HttpBotClient:
         parsed = msgspec.json.decode(resp.content, type=BotApiResponse)
         if not parsed.ok:
             if parsed.error_code == 429:
-                retry_after = parsed.parameters.retry_after if parsed.parameters else 30
+                retry_after = (parsed.parameters.retry_after if parsed.parameters else None) or 30
                 raise RetryAfter(retry_after)
             raise BotApiError(parsed.error_code, parsed.description)
         return parsed

@@ -435,11 +435,11 @@ async def test_resolve_thread_releases_lock_during_retry_sleep(topics_config, st
             # and succeed while the first caller is sleeping
             task2 = asyncio.create_task(bot._resolve_thread_id(sample_issue.repo))
             # Give task2 a chance to complete (it should succeed quickly)
-            done, pending = await asyncio.wait({task2}, timeout=0.5)
-            assert task2 in done, "Second caller was blocked by lock held during sleep"
-
-            # Now release the first caller's sleep
-            sleep_released.set()
+            done, _pending = await asyncio.wait({task2}, timeout=0.5)
+            try:
+                assert task2 in done, "Second caller was blocked by lock held during sleep"
+            finally:
+                sleep_released.set()
             result1 = await task1
 
     result2 = task2.result()
