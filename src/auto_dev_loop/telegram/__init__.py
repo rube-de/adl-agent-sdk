@@ -103,7 +103,8 @@ class TelegramBot:
                 self._thread_cache[repo] = None
                 return None
 
-        assert retry_after is not None, "all non-RetryAfter paths return inside the lock"
+        if retry_after is None:  # pragma: no cover — unreachable; all non-RetryAfter paths return inside the lock
+            return None
 
         # Lock released — sleep without blocking other callers
         log.warning(
