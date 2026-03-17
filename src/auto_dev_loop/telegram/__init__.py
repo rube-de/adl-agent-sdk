@@ -77,15 +77,16 @@ class TelegramBot:
         if repo in self._thread_cache:
             return self._thread_cache[repo]  # may be None (cached failure)
         lock = self._thread_locks.setdefault(repo, asyncio.Lock())
+        retry_after: int | None = None
         async with lock:
+            if repo in self._thread_cache:
+                return self._thread_cache[repo]
+            if self._store:
+                stored = await self._store.get_thread_id(repo)
+                if stored is not None:
+                    self._thread_cache[repo] = stored
+                    return stored
             try:
-                if repo in self._thread_cache:
-                    return self._thread_cache[repo]
-                if self._store:
-                    stored = await self._store.get_thread_id(repo)
-                    if stored is not None:
-                        self._thread_cache[repo] = stored
-                        return stored
                 # Note: create_forum_topic intentionally bypasses the
                 # rate-limited TelegramClient. Topic creation is a
                 # once-per-repo operation (cached immediately), and
@@ -93,23 +94,35 @@ class TelegramBot:
                 result = await self._api.create_forum_topic(self._chat_id, repo)
                 return await self._cache_and_store_thread(repo, result.message_thread_id)
             except RetryAfter as exc:
-                log.warning(
-                    "Rate-limited creating topic for %s, retrying after %ss",
-                    repo, exc.retry_after,
-                )
-                await asyncio.sleep(exc.retry_after)
-                try:
-                    result = await self._api.create_forum_topic(self._chat_id, repo)
-                except (BotApiError, RetryAfter, httpx.HTTPError, OSError, ValueError) as retry_exc:
-                    log.warning("Retry failed for %s: %s", repo, retry_exc)
-                    self._thread_cache[repo] = None
-                    return None
-                return await self._cache_and_store_thread(repo, result.message_thread_id)
+                retry_after = exc.retry_after
             except (BotApiError, httpx.HTTPError, OSError, ValueError) as exc:
                 log.warning(
                     "Failed to create forum topic for %s, sending without topic: %s",
                     repo, exc,
                 )
+                self._thread_cache[repo] = None
+                return None
+
+        if retry_after is None:  # pragma: no cover — unreachable; all non-RetryAfter paths return inside the lock
+            return None
+
+        # Lock released — sleep without blocking other callers
+        log.warning(
+            "Rate-limited creating topic for %s, retrying after %ss",
+            repo, retry_after,
+        )
+        await asyncio.sleep(retry_after)
+
+        # Re-acquire lock for retry
+        async with lock:
+            # Double-check: another caller may have succeeded during our sleep
+            if repo in self._thread_cache:
+                return self._thread_cache[repo]
+            try:
+                result = await self._api.create_forum_topic(self._chat_id, repo)
+                return await self._cache_and_store_thread(repo, result.message_thread_id)
+            except (BotApiError, RetryAfter, httpx.HTTPError, OSError, ValueError) as retry_exc:
+                log.warning("Retry failed for %s: %s", repo, retry_exc)
                 self._thread_cache[repo] = None
                 return None
 

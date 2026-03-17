@@ -400,3 +400,77 @@ def test_use_topics_requires_state_store(topics_config):
     """use_topics=True without a StateStore should raise ValueError."""
     with pytest.raises(ValueError, match="StateStore is required"):
         TelegramBot(topics_config, store=None)
+
+
+# --- Concurrency / lock-during-sleep tests ---
+
+
+@pytest.mark.asyncio
+async def test_resolve_thread_releases_lock_during_retry_sleep(topics_config, state_store, sample_issue):
+    """Lock must be released during RetryAfter sleep so other callers aren't blocked."""
+    bot = TelegramBot(topics_config, store=state_store)
+    sleep_entered = asyncio.Event()
+    sleep_released = asyncio.Event()
+
+    async def mock_sleep(seconds):
+        sleep_entered.set()
+        await sleep_released.wait()
+
+    call_count = 0
+
+    async def mock_create_topic(chat_id, name):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise RetryAfter(30)
+        return ForumTopic(message_thread_id=555, name=name)
+
+    with patch.object(bot._api, "create_forum_topic", side_effect=mock_create_topic):
+        with patch("auto_dev_loop.telegram.asyncio.sleep", side_effect=mock_sleep):
+            # Start first caller — it will hit RetryAfter and enter sleep
+            task1 = asyncio.create_task(bot._resolve_thread_id(sample_issue.repo))
+            await sleep_entered.wait()
+
+            # Second caller should NOT be blocked — it should be able to acquire the lock
+            # and succeed while the first caller is sleeping
+            task2 = asyncio.create_task(bot._resolve_thread_id(sample_issue.repo))
+            # Give task2 a chance to complete (it should succeed quickly)
+            done, _pending = await asyncio.wait({task2}, timeout=0.5)
+            try:
+                assert task2 in done, "Second caller was blocked by lock held during sleep"
+            finally:
+                sleep_released.set()
+            result1 = await task1
+
+    result2 = task2.result()
+    assert result2 == 555
+    # Both callers should get the same thread ID
+    assert result1 == 555
+
+
+@pytest.mark.asyncio
+async def test_resolve_thread_checks_cache_after_reacquire(topics_config, state_store, sample_issue):
+    """After re-acquiring lock post-sleep, must check cache before retrying API call."""
+    bot = TelegramBot(topics_config, store=state_store)
+    sleep_released = asyncio.Event()
+
+    async def mock_sleep(seconds):
+        # Simulate another caller populating the cache during our sleep
+        bot._thread_cache[sample_issue.repo] = 999
+        sleep_released.set()
+
+    with patch.object(
+        bot._api, "create_forum_topic",
+        new_callable=AsyncMock,
+        side_effect=[
+            RetryAfter(1),
+            # This second call should NOT happen if cache is checked
+            ForumTopic(message_thread_id=555, name="owner/repo"),
+        ],
+    ) as mock_create, patch("auto_dev_loop.telegram.asyncio.sleep", side_effect=mock_sleep):
+        thread_id = await bot._resolve_thread_id(sample_issue.repo)
+
+    # Should use the cached value (999), not retry the API call
+    assert thread_id == 999
+    # create_forum_topic should only be called once (the initial attempt that raised RetryAfter)
+    assert mock_create.await_count == 1
